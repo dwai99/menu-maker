@@ -1,0 +1,49 @@
+appId: com.menumaker.app
+productName: Menu Maker
+copyright: Copyright © 2026
+
+directories:
+  buildResources: resources
+  output: dist
+
+files:
+  - out/**/*
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Menu Maker
+
+linux:
+  target:
+    - AppImage
+  category: Office
+  artifactName: ${productName}-${version}.${ext}
+
+fileAssociations:
+  - ext: menu
+    name: Menu Maker Project
+    description: Menu Maker project file
+    role: Editor

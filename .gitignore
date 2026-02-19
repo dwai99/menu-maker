@@ -1,0 +1,17 @@
+node_modules/
+out/
+dist/
+*.menu.autosave
+.DS_Store
+
+# Dev screenshots
+*.png
+
+# Playwright MCP logs
+.playwright-mcp/
+
+# Claude Code personal config
+.claude/
+
+# Dev task tracking
+todo.md
