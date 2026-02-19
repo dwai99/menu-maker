@@ -1,11 +1,35 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron'
-import { join, basename } from 'path'
+import { join, basename, resolve } from 'path'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'fs'
 import { gunzipSync, gzipSync } from 'zlib'
 import { PDFParse } from 'pdf-parse'
 import { createSnapshot, listVersions, loadSnapshot, diffSummary } from './version-history'
 
 let mainWindow: BrowserWindow | null = null
+
+// ── Path Security ────────────────────────────────────────────
+// Track file paths selected via native dialogs or loaded from recent files.
+// Only these paths (plus auto-save companions) are permitted for file I/O.
+
+const allowedPaths = new Set<string>()
+
+function allowPath(filePath: string): void {
+  allowedPaths.add(resolve(filePath))
+}
+
+function isAllowedPath(filePath: string): boolean {
+  const resolved = resolve(filePath)
+  if (allowedPaths.has(resolved)) return true
+  // Allow .autosave companion files for allowed project files
+  if (resolved.endsWith('.autosave') && allowedPaths.has(resolved.replace(/\.autosave$/, ''))) return true
+  return false
+}
+
+function isInsideTemplatesDir(filePath: string): boolean {
+  const templatesDir = resolve(getTemplatesDir())
+  const resolved = resolve(filePath)
+  return resolved.startsWith(templatesDir + '/')
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -16,7 +40,7 @@ function createWindow(): void {
     title: 'Menu Maker',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -40,6 +64,7 @@ function createWindow(): void {
 // ── IPC Handlers ────────────────────────────────────────────
 
 ipcMain.handle('file:save', async (_event, filePath: string, projectJson: string) => {
+  if (!isAllowedPath(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     const compressed = gzipSync(Buffer.from(projectJson, 'utf-8'))
     writeFileSync(filePath, compressed)
@@ -50,6 +75,7 @@ ipcMain.handle('file:save', async (_event, filePath: string, projectJson: string
 })
 
 ipcMain.handle('file:open', async (_event, filePath: string) => {
+  if (!isAllowedPath(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     const compressed = readFileSync(filePath)
     const decompressed = gunzipSync(compressed).toString('utf-8')
@@ -69,6 +95,7 @@ ipcMain.handle('dialog:save', async () => {
       { name: 'All Files', extensions: ['*'] },
     ],
   })
+  if (!result.canceled && result.filePath) allowPath(result.filePath)
   return result
 })
 
@@ -82,6 +109,9 @@ ipcMain.handle('dialog:open', async () => {
     ],
     properties: ['openFile'],
   })
+  if (!result.canceled && result.filePaths.length > 0) {
+    result.filePaths.forEach((p) => allowPath(p))
+  }
   return result
 })
 
@@ -94,6 +124,9 @@ ipcMain.handle('dialog:open-pdf', async () => {
     ],
     properties: ['openFile'],
   })
+  if (!result.canceled && result.filePaths.length > 0) {
+    result.filePaths.forEach((p) => allowPath(p))
+  }
   return result
 })
 
@@ -106,6 +139,9 @@ ipcMain.handle('dialog:open-image', async () => {
     ],
     properties: ['openFile'],
   })
+  if (!result.canceled && result.filePaths.length > 0) {
+    result.filePaths.forEach((p) => allowPath(p))
+  }
   return result
 })
 
@@ -118,10 +154,14 @@ ipcMain.handle('dialog:open-import-image', async () => {
     ],
     properties: ['openFile'],
   })
+  if (!result.canceled && result.filePaths.length > 0) {
+    result.filePaths.forEach((p) => allowPath(p))
+  }
   return result
 })
 
 ipcMain.handle('file:read-binary', async (_event, filePath: string) => {
+  if (!isAllowedPath(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     const data = readFileSync(filePath)
     return { success: true, data: data.toString('base64') }
@@ -131,6 +171,7 @@ ipcMain.handle('file:read-binary', async (_event, filePath: string) => {
 })
 
 ipcMain.handle('import:parse-pdf', async (_event, filePath: string) => {
+  if (!isAllowedPath(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     const fileBuffer = readFileSync(filePath)
     const uint8 = new Uint8Array(fileBuffer)
@@ -184,9 +225,10 @@ ipcMain.handle('save-image-data', async (_event, options: { dataUrl: string; for
   }
 
   try {
-    // Strip data URL prefix: "data:image/png;base64,..." → raw base64
-    const base64Data = options.dataUrl.replace(/^data:image\/\w+;base64,/, '')
-    const buffer = Buffer.from(base64Data, 'base64')
+    // Validate and strip data URL prefix
+    const match = options.dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/)
+    if (!match) return { success: false, error: 'Invalid image data URL' }
+    const buffer = Buffer.from(match[2], 'base64')
     writeFileSync(saveResult.filePath, buffer)
     return { success: true, filePath: saveResult.filePath }
   } catch (error: any) {
@@ -197,6 +239,7 @@ ipcMain.handle('save-image-data', async (_event, options: { dataUrl: string; for
 // ── Version History ─────────────────────────────────────────
 
 ipcMain.handle('version:create-snapshot', async (_event, options: { projectFilePath: string; projectJson: string; summary?: string }) => {
+  if (!isAllowedPath(options.projectFilePath)) return { success: false, error: 'Path not permitted' }
   try {
     const entry = createSnapshot(options.projectFilePath, options.projectJson, options.summary)
     return { success: true, entry }
@@ -206,6 +249,7 @@ ipcMain.handle('version:create-snapshot', async (_event, options: { projectFileP
 })
 
 ipcMain.handle('version:list', async (_event, projectFilePath: string) => {
+  if (!isAllowedPath(projectFilePath)) return { success: false, error: 'Path not permitted' }
   try {
     const entries = listVersions(projectFilePath)
     return { success: true, entries }
@@ -215,6 +259,7 @@ ipcMain.handle('version:list', async (_event, projectFilePath: string) => {
 })
 
 ipcMain.handle('version:load-snapshot', async (_event, options: { projectFilePath: string; versionId: string }) => {
+  if (!isAllowedPath(options.projectFilePath)) return { success: false, error: 'Path not permitted' }
   try {
     const data = loadSnapshot(options.projectFilePath, options.versionId)
     if (!data) return { success: false, error: 'Snapshot not found' }
@@ -254,7 +299,8 @@ const getTemplatesDir = () => {
 ipcMain.handle('template:save-custom', async (_event, name: string, projectJson: string) => {
   try {
     const dir = getTemplatesDir()
-    const safeName = name.replace(/[^a-zA-Z0-9_\- ]/g, '_')
+    const safeName = name.replace(/[^a-zA-Z0-9_\-]/g, '_').trim()
+    if (!safeName) return { success: false, error: 'Invalid template name' }
     const filePath = join(dir, `${safeName}.json`)
     writeFileSync(filePath, projectJson, 'utf-8')
     return { success: true, filePath }
@@ -278,6 +324,7 @@ ipcMain.handle('template:list-custom', async () => {
 })
 
 ipcMain.handle('template:load-custom', async (_event, filePath: string) => {
+  if (!isInsideTemplatesDir(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     const data = readFileSync(filePath, 'utf-8')
     return { success: true, data }
@@ -287,6 +334,7 @@ ipcMain.handle('template:load-custom', async (_event, filePath: string) => {
 })
 
 ipcMain.handle('template:delete-custom', async (_event, filePath: string) => {
+  if (!isInsideTemplatesDir(filePath)) return { success: false, error: 'Path not permitted' }
   try {
     unlinkSync(filePath)
     return { success: true }
@@ -355,9 +403,15 @@ function addRecentFile(filePath: string): void {
   buildMenu()
 }
 
-ipcMain.handle('file:get-recent', () => getRecentFiles())
+ipcMain.handle('file:get-recent', () => {
+  const files = getRecentFiles()
+  // Pre-allow recent files so they can be opened without a dialog
+  files.forEach((f) => allowPath(f))
+  return files
+})
 
 ipcMain.handle('file:add-recent', (_event, filePath: string) => {
+  if (!isAllowedPath(filePath)) return
   addRecentFile(filePath)
 })
 
@@ -400,7 +454,10 @@ function buildMenu(): void {
     ? [
         ...recentFiles.map((filePath) => ({
           label: basename(filePath),
-          click: () => mainWindow?.webContents.send('menu:open-recent', filePath),
+          click: () => {
+            allowPath(filePath)
+            mainWindow?.webContents.send('menu:open-recent', filePath)
+          },
         })),
         { type: 'separator' as const },
         {
@@ -508,7 +565,7 @@ function buildMenu(): void {
       submenu: [
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        ...(!app.isPackaged ? [{ role: 'toggleDevTools' as const }] : []),
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
