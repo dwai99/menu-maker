@@ -12,6 +12,7 @@ import { PagePreview } from '@/components/preview/PagePreview'
 import { useExportImage } from '@/hooks/useExportImage'
 import { PAGE_SIZES } from '@/models/layout'
 import DocumentTabBar from './DocumentTabBar'
+import { WhatChangedModal } from './WhatChangedModal'
 
 /**
  * Floating toast displayed in the bottom-right corner while OCR is running.
@@ -102,6 +103,7 @@ export default function AppShell({ onShowTemplates, onShowHistory }: AppShellPro
   const [showPreferencesModal, setShowPreferencesModal] = useState(false)
   const [renamingViewId, setRenamingViewId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [showWhatChanged, setShowWhatChanged] = useState(false)
 
   // Close export dropdown when clicking outside
   useEffect(() => {
@@ -210,6 +212,13 @@ export default function AppShell({ onShowTemplates, onShowHistory }: AppShellPro
               History
             </button>
           )}
+          <button
+            onClick={() => setShowWhatChanged(true)}
+            className="px-3 py-1.5 text-xs font-medium text-neutral-600 bg-white border border-neutral-200 rounded-md hover:bg-neutral-50 transition-colors"
+            title="See what changed since last save"
+          >
+            What Changed
+          </button>
           <span className="border-l border-neutral-200 h-5 mx-1" />
         </div>
 
@@ -497,6 +506,11 @@ export default function AppShell({ onShowTemplates, onShowHistory }: AppShellPro
 
       {/* OCR progress toast — fixed bottom-right, reads from ui-store */}
       <OCRProgressToast />
+
+      {/* What Changed modal */}
+      {showWhatChanged && (
+        <WhatChangedModal onClose={() => setShowWhatChanged(false)} />
+      )}
 
       {/* Preferences Modal */}
       {showPreferencesModal && (

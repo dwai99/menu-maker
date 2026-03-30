@@ -1,4 +1,4 @@
-export type PageSizeId = 'letter' | 'legal' | 'half-letter' | 'a4' | 'a5' | 'table-tent' | 'tri-fold'
+export type PageSizeId = 'letter' | 'legal' | 'half-letter' | 'a4' | 'a5' | 'table-tent' | '4x6' | '5x7' | 'tri-fold'
 export type Orientation = 'portrait' | 'landscape'
 export type HeaderLayoutPreset = 'centered-stack' | 'left-logo' | 'right-logo' | 'inline' | 'minimal' | 'custom'
 
@@ -40,6 +40,8 @@ export const PAGE_SIZES: Record<PageSizeId, PageDimensions> = {
   'a4': { width: 8.27, height: 11.69, label: 'A4 (210 × 297mm)' },
   'a5': { width: 5.83, height: 8.27, label: 'A5 (148 × 210mm)' },
   'table-tent': { width: 4, height: 6, label: 'Table Tent (4" × 6")' },
+  '4x6': { width: 4, height: 6, label: 'Table Tent Card (4" × 6")' },
+  '5x7': { width: 5, height: 7, label: 'Bar Card / Table Tent (5" × 7")' },
   'tri-fold': { width: 3.67, height: 8.5, label: 'Tri-fold Panel (3.67" × 8.5")' },
 }
 
@@ -121,6 +123,7 @@ export interface PageLayout {
   printMarks?: PrintMarks
   showDietaryLegend?: boolean
   headerConfig?: HeaderConfig
+  autoShrinkFonts?: boolean
 }
 
 export function createDefaultFontStyle(overrides?: Partial<FontStyle>): FontStyle {

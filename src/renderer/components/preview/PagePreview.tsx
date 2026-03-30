@@ -17,6 +17,7 @@ import { estimateHeaderHeight, estimateFooterHeight } from '@/layout/measure'
 import { getFragmentId, findFragment, resizeFragment } from '@/layout/layout-engine'
 import { getTriFoldFoldLinesByType, getTriFoldLineStyle } from '@/layout/tri-fold'
 import { useLayoutCommit } from '@/hooks/useLayoutCommit'
+import { useAutoShrinkFonts } from '@/hooks/useAutoShrinkFonts'
 import { TRI_FOLD_FRONT_PANELS, TRI_FOLD_BACK_PANELS, TRI_FOLD_PANEL_LABELS } from '@/models/layout'
 import type { TriFoldPanelRole } from '@/models/layout'
 
@@ -367,6 +368,9 @@ export const PagePreview: React.FC = () => {
     },
     []
   )
+
+  // Auto-shrink fonts when content overflows and the feature is enabled
+  useAutoShrinkFonts()
 
   // Layout commit: one-shot measurement after auto-layout writes corrections to the store
   useLayoutCommit({

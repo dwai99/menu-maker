@@ -638,6 +638,28 @@ export const PageTab: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Auto-shrink fonts */}
+        <div className="flex items-start gap-3">
+          <input
+            id="auto-shrink-fonts"
+            type="checkbox"
+            checked={pageLayout.autoShrinkFonts ?? false}
+            onChange={(e) => {
+              updateLayout('autoShrinkFonts', e.target.checked);
+              markDirty();
+            }}
+            className="mt-0.5 h-4 w-4 rounded border-neutral-300 accent-amber-600 cursor-pointer"
+          />
+          <div>
+            <label htmlFor="auto-shrink-fonts" className="block text-sm font-semibold text-neutral-700 cursor-pointer select-none">
+              Auto-shrink fonts to fit
+            </label>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              When content overflows the page, automatically reduce all font sizes proportionally until content fits (minimum 6pt).
+            </p>
+          </div>
+        </div>
       </AccordionSection>
 
       {/* ── 2. Page Format ── */}

@@ -128,6 +128,10 @@ export function useProjectManager() {
     const result = await window.electronAPI.fileSave(filePath, json)
     if (result.success) {
       uiStore.markClean()
+      // Snapshot current menu data as the new "last saved" baseline for What Changed
+      useUIStore.getState().setLastSavedMenuData(
+        JSON.parse(JSON.stringify(useMenuStore.getState().menuData))
+      )
       // Update tab name/path
       const { activeDocumentId, updateDocumentTab } = useUIStore.getState()
       if (activeDocumentId) {
@@ -156,6 +160,10 @@ export function useProjectManager() {
     const saveResult = await window.electronAPI.fileSave(result.filePath, json)
     if (saveResult.success) {
       uiStore.markClean()
+      // Snapshot current menu data as the new "last saved" baseline for What Changed
+      useUIStore.getState().setLastSavedMenuData(
+        JSON.parse(JSON.stringify(useMenuStore.getState().menuData))
+      )
       const { activeDocumentId, updateDocumentTab } = useUIStore.getState()
       if (activeDocumentId) {
         updateDocumentTab(activeDocumentId, {

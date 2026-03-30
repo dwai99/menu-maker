@@ -74,6 +74,10 @@ interface UIStore {
   markClean: () => void
   setFilePath: (path: string | null) => void
 
+  // What Changed baseline — snapshot of menuData at last save
+  lastSavedMenuData: MenuData | null
+  setLastSavedMenuData: (data: MenuData | null) => void
+
   // Document tabs
   documentTabs: DocumentTab[]
   activeDocumentId: string | null
@@ -295,6 +299,13 @@ export const useUIStore = create<UIStore>()((set, get) => ({
   // Project state
   isDirty: false,
   currentFilePath: null,
+
+  // What Changed baseline
+  lastSavedMenuData: null,
+
+  setLastSavedMenuData: (data: MenuData | null) => {
+    set({ lastSavedMenuData: data })
+  },
 
   // Auto-fit
   autoFitCounter: 0,
