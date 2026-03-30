@@ -100,6 +100,8 @@ export default function AppShell({ onShowTemplates, onShowHistory }: AppShellPro
   const [showApiKeyModal, setShowApiKeyModal] = useState(false)
   const [apiKeyValue, setApiKeyValue] = useState('')
   const [showPreferencesModal, setShowPreferencesModal] = useState(false)
+  const [renamingViewId, setRenamingViewId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   // Close export dropdown when clicking outside
   useEffect(() => {
@@ -243,20 +245,47 @@ export default function AppShell({ onShowTemplates, onShowHistory }: AppShellPro
               <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider mr-0.5">View:</span>
               <div className="flex items-center bg-neutral-200 rounded-md p-0.5 gap-px">
                 {layoutViews.map((view) => (
-                  <button
-                    key={view.id}
-                    onClick={() => {
-                      switchLayoutView(view.id)
-                      useUIStore.getState().markDirty()
-                    }}
-                    className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                      view.id === activeLayoutViewId
-                        ? 'bg-white text-amber-700 shadow-sm'
-                        : 'text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100'
-                    }`}
-                  >
-                    {view.name}
-                  </button>
+                  renamingViewId === view.id ? (
+                    <input
+                      key={view.id}
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => {
+                        if (renameValue.trim()) {
+                          setLayoutViews(layoutViews.map(v => v.id === view.id ? { ...v, name: renameValue.trim() } : v))
+                          useUIStore.getState().markDirty()
+                        }
+                        setRenamingViewId(null)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                        if (e.key === 'Escape') setRenamingViewId(null)
+                      }}
+                      className="px-2 py-0.5 text-xs font-medium border border-amber-400 rounded bg-white focus:outline-none focus:ring-2 focus:ring-amber-500 w-24"
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      key={view.id}
+                      onClick={() => {
+                        switchLayoutView(view.id)
+                        useUIStore.getState().markDirty()
+                      }}
+                      onDoubleClick={() => {
+                        setRenamingViewId(view.id)
+                        setRenameValue(view.name)
+                      }}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                        view.id === activeLayoutViewId
+                          ? 'bg-white text-amber-700 shadow-sm'
+                          : 'text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100'
+                      }`}
+                      title="Click to switch, double-click to rename"
+                    >
+                      {view.name}
+                    </button>
+                  )
                 ))}
               </div>
               <button

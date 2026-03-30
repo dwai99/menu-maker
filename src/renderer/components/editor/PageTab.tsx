@@ -62,7 +62,7 @@ const AccordionSection: React.FC<AccordionSectionProps> = ({ title, expanded, on
 );
 
 export const PageTab: React.FC = () => {
-  const { pageLayout, setPageSize, setOrientation, setMargins, setColumnCount, setLayoutDirection, setItemSeparator, setPriceFormat, setPricePosition, setSectionDecoration, setCurrency, setBackgroundTexture, setSectionDivider, setPageBorder, setSectionGap, setVariantDisplayMode, setVariantSeparator, setSectionDecorations, setSectionLayouts, clearAllSectionLayouts, addPage, removePage, renamePage, setPageColumnCount, enableMultiPageMode, disableMultiPageMode, assignSectionToPage, setSectionTitleDecoration, enableTriFold, disableTriFold, setTriFoldPaperSize, setTriFoldPanelSections, setTriFoldType, updateTriFoldConfig, setHeaderConfig, setPrintMarks, setShowDietaryLegend, applyBatchUpdate } =
+  const { pageLayout, updateLayout, setSectionLayouts, clearAllSectionLayouts, addPage, removePage, renamePage, setPageColumnCount, enableMultiPageMode, disableMultiPageMode, assignSectionToPage, enableTriFold, disableTriFold, setTriFoldPaperSize, setTriFoldPanelSections, setTriFoldType, updateTriFoldConfig, setHeaderConfig, setPrintMarks, applyBatchUpdate } =
     useLayoutStore();
   const menuData = useMenuStore((s) => s.menuData);
   const { markDirty, overflowState, selectedSectionIds, setActivePageId, setPendingLayoutCommit, layoutViews, activeLayoutViewId, setLayoutViews, setActiveLayoutViewId, switchLayoutView } = useUIStore();
@@ -130,31 +130,28 @@ export const PageTab: React.FC = () => {
   const [aiReasoning, setAiReasoning] = useState('');
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPageSize(e.target.value as PageSizeId);
+    updateLayout('pageSize', e.target.value as PageSizeId);
     markDirty();
   };
 
   const handleOrientationChange = (orientation: Orientation) => {
-    setOrientation(orientation);
+    updateLayout('orientation', orientation);
     markDirty();
   };
 
   const handleMarginChange = (side: 'top' | 'right' | 'bottom' | 'left', value: string) => {
     const numValue = parseFloat(value) || 0;
-    setMargins({
-      ...pageLayout.margins,
-      [side]: numValue,
-    });
+    updateLayout('margins', { ...pageLayout.margins, [side]: numValue });
     markDirty();
   };
 
   const handleItemSeparatorChange = (separator: ItemSeparator) => {
-    setItemSeparator(separator);
+    updateLayout('itemSeparator', separator);
     markDirty();
   };
 
   const handlePriceFormatChange = (format: PriceFormat) => {
-    setPriceFormat(format);
+    updateLayout('priceFormat', format);
     markDirty();
   };
 
@@ -261,19 +258,19 @@ export const PageTab: React.FC = () => {
     // and just switch to columnCount 1 for freeform drag/resize.
     // Only generate new layouts if none exist.
     if ((pageLayout.sectionLayouts?.length ?? 0) > 0) {
-      setColumnCount(1);
+      updateLayout('columnCount', 1);
     } else {
       const result = computeFlowLayout({
         sections: menuData.sections,
         pageLayout: { ...pageLayout, columnCount: 1 },
         menuData,
       });
-      setColumnCount(1);
+      updateLayout('columnCount', 1);
       setSectionLayouts(result.sectionLayouts);
       setPendingLayoutCommit(true);
     }
     markDirty();
-  }, [menuData, pageLayout, setColumnCount, setSectionLayouts, setPendingLayoutCommit, markDirty]);
+  }, [menuData, pageLayout, updateLayout, setSectionLayouts, setPendingLayoutCommit, markDirty]);
 
   const handleClearLayout = useCallback(() => {
     clearAllSectionLayouts();
@@ -570,7 +567,7 @@ export const PageTab: React.FC = () => {
                   key={n}
                   type="button"
                   onClick={() => {
-                    setColumnCount(n as ColumnCount);
+                    updateLayout('columnCount', n as ColumnCount);
                     // Clicking "1" returns to flow mode (clear explicit layouts)
                     if (n === 1) clearAllSectionLayouts();
                     markDirty();
@@ -597,7 +594,7 @@ export const PageTab: React.FC = () => {
             <div className="flex">
               <button
                 type="button"
-                onClick={() => { setLayoutDirection('vertical'); handleAutoLayoutAfterDirectionChange(); }}
+                onClick={() => { updateLayout('layoutDirection', 'vertical'); handleAutoLayoutAfterDirectionChange(); }}
                 className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
                   pageLayout.layoutDirection !== 'horizontal'
                     ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -608,7 +605,7 @@ export const PageTab: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => { setLayoutDirection('horizontal'); handleAutoLayoutAfterDirectionChange(); }}
+                onClick={() => { updateLayout('layoutDirection', 'horizontal'); handleAutoLayoutAfterDirectionChange(); }}
                 className={`px-3 py-2 text-sm border rounded-r-lg ${
                   pageLayout.layoutDirection === 'horizontal'
                     ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -634,7 +631,7 @@ export const PageTab: React.FC = () => {
                 max={48}
                 step={4}
                 value={pageLayout.sectionGap ?? 16}
-                onChange={(e) => { setSectionGap(parseInt(e.target.value)); markDirty(); }}
+                onChange={(e) => { updateLayout('sectionGap', parseInt(e.target.value)); markDirty(); }}
                 className="flex-1"
               />
               <span className="text-sm text-neutral-500 w-8 text-right">{pageLayout.sectionGap ?? 16}px</span>
@@ -1059,9 +1056,9 @@ export const PageTab: React.FC = () => {
                       const next = isActive
                         ? currentDecs.filter((d) => d !== value)
                         : [...currentDecs, value as SectionDecoration]
-                      setSectionDecorations(next)
+                      updateLayout('sectionDecorations', next)
                       // Keep legacy field in sync
-                      setSectionDecoration(next.length > 0 ? next[0] : 'none')
+                      updateLayout('sectionDecoration', next.length > 0 ? next[0] : 'none')
                       markDirty()
                     }}
                     className="w-3.5 h-3.5 text-amber-600 border-neutral-300 rounded focus:ring-2 focus:ring-amber-500"
@@ -1091,7 +1088,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setSectionDivider(value as SectionDivider); markDirty(); }}
+                onClick={() => { updateLayout('sectionDivider', value as SectionDivider); markDirty(); }}
                 className={`px-3 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -1123,7 +1120,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setSectionTitleDecoration(value as SectionTitleDecoration); markDirty(); }}
+                onClick={() => { updateLayout('sectionTitleDecoration', value as SectionTitleDecoration); markDirty(); }}
                 className={`px-3 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -1154,7 +1151,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setCurrency(value as Currency); markDirty(); }}
+                onClick={() => { updateLayout('currency', value as Currency); markDirty(); }}
                 className={`px-3 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -1186,7 +1183,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setBackgroundTexture(value as BackgroundTexture); markDirty(); }}
+                onClick={() => { updateLayout('backgroundTexture', value as BackgroundTexture); markDirty(); }}
                 className={`px-3 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -1217,7 +1214,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setPageBorder(value as PageBorder); markDirty(); }}
+                onClick={() => { updateLayout('pageBorder', value as PageBorder); markDirty(); }}
                 className={`px-3 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -1238,7 +1235,7 @@ export const PageTab: React.FC = () => {
             <input
               type="checkbox"
               checked={pageLayout.showDietaryLegend ?? false}
-              onChange={(e) => { setShowDietaryLegend(e.target.checked); markDirty(); }}
+              onChange={(e) => { updateLayout('showDietaryLegend', e.target.checked); markDirty(); }}
               className="rounded border-neutral-300 text-amber-600 focus:ring-amber-500"
             />
             <span className="text-sm font-semibold text-neutral-700">Show dietary legend</span>
@@ -1303,7 +1300,7 @@ export const PageTab: React.FC = () => {
           <div className="flex">
             <button
               type="button"
-              onClick={() => { setPricePosition('inline'); markDirty(); }}
+              onClick={() => { updateLayout('pricePosition', 'inline'); markDirty(); }}
               className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
                 (pageLayout.pricePosition || 'inline') === 'inline'
                   ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -1314,7 +1311,7 @@ export const PageTab: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => { setPricePosition('below'); markDirty(); }}
+              onClick={() => { updateLayout('pricePosition', 'below'); markDirty(); }}
               className={`px-3 py-2 text-sm border rounded-r-lg ${
                 pageLayout.pricePosition === 'below'
                   ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -1335,7 +1332,7 @@ export const PageTab: React.FC = () => {
           <div className="flex">
             <button
               type="button"
-              onClick={() => { setVariantDisplayMode('inline'); markDirty(); }}
+              onClick={() => { updateLayout('variantDisplayMode', 'inline'); markDirty(); }}
               className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
                 (pageLayout.variantDisplayMode || 'inline') === 'inline'
                   ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -1346,7 +1343,7 @@ export const PageTab: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => { setVariantDisplayMode('stacked'); markDirty(); }}
+              onClick={() => { updateLayout('variantDisplayMode', 'stacked'); markDirty(); }}
               className={`px-3 py-2 text-sm border rounded-r-lg ${
                 pageLayout.variantDisplayMode === 'stacked'
                   ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -1374,7 +1371,7 @@ export const PageTab: React.FC = () => {
               <button
                 key={value}
                 type="button"
-                onClick={() => { setVariantSeparator(value as VariantSeparator); markDirty(); }}
+                onClick={() => { updateLayout('variantSeparator', value as VariantSeparator); markDirty(); }}
                 className={`px-4 py-2 text-sm border ${
                   i > 0 ? 'border-l-0' : ''
                 } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${

@@ -77,6 +77,8 @@ export interface ColorScheme {
   text: string
   accent: string
   border: string
+  sectionTitle?: string   // falls back to accent
+  price?: string          // falls back to accent
 }
 
 export interface SectionLayout {

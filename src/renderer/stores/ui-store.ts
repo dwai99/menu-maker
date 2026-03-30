@@ -3,6 +3,7 @@ import type { OverflowState } from '../layout/overflow'
 import type { MenuData } from '../models/menu'
 import type { PageLayout } from '../models/layout'
 import type { LayoutView } from '../models/project'
+import { useLayoutStore } from './layout-store'
 
 export interface DocumentTab {
   id: string
@@ -385,8 +386,6 @@ export const useUIStore = create<UIStore>()((set, get) => ({
   syncActiveViewLayout: () => {
     const { layoutViews, activeLayoutViewId } = get()
     if (!activeLayoutViewId || layoutViews.length === 0) return
-    // Lazy import to avoid circular dependency
-    const { useLayoutStore } = require('./layout-store')
     const currentLayout = useLayoutStore.getState().pageLayout
     set({
       layoutViews: layoutViews.map(v =>
@@ -398,8 +397,6 @@ export const useUIStore = create<UIStore>()((set, get) => ({
   switchLayoutView: (viewId: string) => {
     const { layoutViews, activeLayoutViewId } = get()
     if (viewId === activeLayoutViewId || layoutViews.length === 0) return
-    // Lazy import to avoid circular dependency
-    const { useLayoutStore } = require('./layout-store')
     // Save current layout back into departing view
     const currentLayout = useLayoutStore.getState().pageLayout
     const updated = layoutViews.map(v =>

@@ -18,14 +18,14 @@ describe('Layout Store', () => {
 
     it('should set page size', () => {
         act(() => {
-            useLayoutStore.getState().setPageSize('a4')
+            useLayoutStore.getState().updateLayout('pageSize', 'a4')
         })
         expect(useLayoutStore.getState().pageLayout.pageSize).toBe('a4')
     })
 
     it('should set orientation', () => {
         act(() => {
-            useLayoutStore.getState().setOrientation('landscape')
+            useLayoutStore.getState().updateLayout('orientation', 'landscape')
         })
         expect(useLayoutStore.getState().pageLayout.orientation).toBe('landscape')
     })
@@ -33,14 +33,14 @@ describe('Layout Store', () => {
     it('should set margins', () => {
         const newMargins = { top: 1, right: 1, bottom: 1, left: 1 }
         act(() => {
-            useLayoutStore.getState().setMargins(newMargins)
+            useLayoutStore.getState().updateLayout('margins', newMargins)
         })
         expect(useLayoutStore.getState().pageLayout.margins).toEqual(newMargins)
     })
 
     it('should set column count', () => {
         act(() => {
-            useLayoutStore.getState().setColumnCount(2)
+            useLayoutStore.getState().updateLayout('columnCount', 2)
         })
         expect(useLayoutStore.getState().pageLayout.columnCount).toBe(2)
     })

@@ -7,11 +7,7 @@ import {
   ColorScheme,
   TypographyConfig,
   FontStyle,
-  PageSizeId,
   Orientation,
-  Margins,
-  ItemSeparator,
-  PriceFormat,
   createDefaultPageLayout,
 } from '../models/layout'
 import type { ColumnCount, LayoutDirection, SectionDecoration, Currency, BackgroundTexture, SectionDivider, PageBorder, Vertex, PageDefinition, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, TriFoldConfig, TriFoldPaperSize, TriFoldPanelRole, TriFoldType, PrintMarks, HeaderConfig, PricePosition } from '../models/layout'
@@ -21,27 +17,9 @@ import { parseFragmentId } from '../layout/layout-engine'
 interface LayoutStore {
   pageLayout: PageLayout
 
-  setPageSize: (size: PageSizeId) => void
-  setOrientation: (orientation: Orientation) => void
-  setMargins: (margins: Margins) => void
+  updateLayout: <K extends keyof PageLayout>(key: K, value: PageLayout[K]) => void
   setColorScheme: (scheme: Partial<ColorScheme>) => void
   setTypography: (role: keyof TypographyConfig, style: Partial<FontStyle>) => void
-  setColumnCount: (count: ColumnCount) => void
-  setLayoutDirection: (dir: LayoutDirection) => void
-  setItemSeparator: (sep: ItemSeparator) => void
-  setPriceFormat: (format: PriceFormat) => void
-  setPricePosition: (position: PricePosition) => void
-  setSectionDecoration: (dec: SectionDecoration) => void
-  setCurrency: (currency: Currency) => void
-  setBackgroundTexture: (texture: BackgroundTexture) => void
-  setSectionDivider: (divider: SectionDivider) => void
-  setPageBorder: (border: PageBorder) => void
-  setSectionGap: (gap: number) => void
-  setVariantDisplayMode: (mode: VariantDisplayMode) => void
-  setVariantSeparator: (sep: VariantSeparator) => void
-  setHeaderHeight: (height: number) => void
-  setSectionDecorations: (decs: SectionDecoration[]) => void
-  setSectionTitleDecoration: (dec: SectionTitleDecoration) => void
 
   // Section layout
   setSectionLayout: (sectionId: string, layout: Partial<SectionLayout>) => void
@@ -72,9 +50,6 @@ interface LayoutStore {
   // Print marks
   setPrintMarks: (marks: Partial<PrintMarks>) => void
 
-  // Dietary legend
-  setShowDietaryLegend: (show: boolean) => void
-
   // Tri-fold
   enableTriFold: (paperSize?: TriFoldPaperSize) => void
   disableTriFold: () => void
@@ -97,21 +72,9 @@ interface LayoutStore {
 export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
   pageLayout: createDefaultPageLayout(),
 
-  setPageSize: (size: PageSizeId) => {
+  updateLayout: <K extends keyof PageLayout>(key: K, value: PageLayout[K]) => {
     set((state) => ({
-      pageLayout: { ...state.pageLayout, pageSize: size },
-    }))
-  },
-
-  setOrientation: (orientation: Orientation) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, orientation },
-    }))
-  },
-
-  setMargins: (margins: Margins) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, margins },
+      pageLayout: { ...state.pageLayout, [key]: value },
     }))
   },
 
@@ -166,102 +129,6 @@ export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
           [role]: { ...state.pageLayout.typography[role], ...style },
         },
       },
-    }))
-  },
-
-  setColumnCount: (count: ColumnCount) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, columnCount: count },
-    }))
-  },
-
-  setLayoutDirection: (dir: LayoutDirection) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, layoutDirection: dir },
-    }))
-  },
-
-  setItemSeparator: (sep: ItemSeparator) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, itemSeparator: sep },
-    }))
-  },
-
-  setPriceFormat: (format: PriceFormat) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, priceFormat: format },
-    }))
-  },
-
-  setPricePosition: (position: PricePosition) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, pricePosition: position },
-    }))
-  },
-
-  setSectionDecoration: (dec: SectionDecoration) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, sectionDecoration: dec },
-    }))
-  },
-
-  setCurrency: (currency: Currency) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, currency },
-    }))
-  },
-
-  setBackgroundTexture: (texture: BackgroundTexture) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, backgroundTexture: texture },
-    }))
-  },
-
-  setSectionDivider: (divider: SectionDivider) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, sectionDivider: divider },
-    }))
-  },
-
-  setSectionTitleDecoration: (dec: SectionTitleDecoration) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, sectionTitleDecoration: dec },
-    }))
-  },
-
-  setPageBorder: (border: PageBorder) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, pageBorder: border },
-    }))
-  },
-
-  setSectionGap: (gap: number) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, sectionGap: gap },
-    }))
-  },
-
-  setVariantDisplayMode: (mode: VariantDisplayMode) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, variantDisplayMode: mode },
-    }))
-  },
-
-  setVariantSeparator: (sep: VariantSeparator) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, variantSeparator: sep },
-    }))
-  },
-
-  setHeaderHeight: (height: number) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, headerHeight: height },
-    }))
-  },
-
-  setSectionDecorations: (decs: SectionDecoration[]) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, sectionDecorations: decs },
     }))
   },
 
@@ -569,12 +436,6 @@ export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
           ...marks,
         },
       },
-    }))
-  },
-
-  setShowDietaryLegend: (show: boolean) => {
-    set((state) => ({
-      pageLayout: { ...state.pageLayout, showDietaryLegend: show },
     }))
   },
 

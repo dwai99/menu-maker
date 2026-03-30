@@ -142,7 +142,7 @@ export function useProjectManager() {
         await window.electronAPI.createSnapshot({ projectFilePath: filePath, projectJson: json, summary: 'Save' })
       } catch { /* non-critical */ }
     } else {
-      alert(`Failed to save: ${result.error}`)
+      console.error('Failed to save:', result.error)
     }
   }, [uiStore, serializeProject])
 
@@ -169,7 +169,7 @@ export function useProjectManager() {
         await window.electronAPI.createSnapshot({ projectFilePath: result.filePath, projectJson: json, summary: 'Save As' })
       } catch { /* non-critical */ }
     } else {
-      alert(`Failed to save: ${saveResult.error}`)
+      console.error('Failed to save:', saveResult.error)
     }
   }, [uiStore, serializeProject])
 
@@ -184,7 +184,7 @@ export function useProjectManager() {
       openFileInTab(filePath, fileResult.data)
       try { await window.electronAPI.addRecentFile(filePath) } catch { /* non-critical */ }
     } else {
-      alert(`Failed to open: ${fileResult.error}`)
+      console.error('Failed to open:', fileResult.error)
     }
   }, [openFileInTab])
 
@@ -196,7 +196,7 @@ export function useProjectManager() {
       openFileInTab(filePath, fileResult.data)
       try { await window.electronAPI.addRecentFile(filePath) } catch { /* non-critical */ }
     } else {
-      alert(`Failed to open: ${fileResult.error}`)
+      console.error('Failed to open:', fileResult.error)
     }
   }, [openFileInTab])
 
@@ -216,10 +216,10 @@ export function useProjectManager() {
         menuStore.loadMenuData(project.menuData)
         uiStore.markDirty()
       } catch {
-        alert('Failed to parse menu file for import')
+        console.error('Failed to parse menu file for import')
       }
     } else {
-      alert(`Failed to open: ${fileResult.error}`)
+      console.error('Failed to open:', fileResult.error)
     }
   }, [menuStore, uiStore])
 

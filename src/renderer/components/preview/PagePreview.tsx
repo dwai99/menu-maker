@@ -7,7 +7,7 @@ import { PAGE_SIZES } from '@/models/layout'
 import type { SectionLayout, ColumnCount, SectionDecoration, ColorScheme, BackgroundTexture, PageBorder, SectionDivider, Currency, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, HeaderConfig, HeaderLayoutPreset, PricePosition } from '@/models/layout'
 import { createDefaultHeaderConfig } from '@/models/layout'
 import { DIETARY_ICON_META, ITEM_BADGE_META } from '@/models/menu'
-import type { DietaryIcon, ItemBadge, PriceVariant, HeaderElementPosition } from '@/models/menu'
+import type { DietaryIcon, ItemBadge, PriceVariant, HeaderElementPosition, MenuItem, MenuSection } from '@/models/menu'
 import { boundingBox } from '@/layout/polygon'
 import { PolygonEditor } from './PolygonEditor'
 import { DraggableImage } from './DraggableImage'
@@ -749,7 +749,7 @@ export const PagePreview: React.FC = () => {
     const current = pageLayout.columnCount || 1
     if (current < 6) {
       const store = useLayoutStore.getState()
-      store.setColumnCount((current + 1) as ColumnCount)
+      store.updateLayout('columnCount', (current + 1) as ColumnCount)
       // Recalculate layouts with the new column count to avoid stale split fragments
       const updatedLayout = useLayoutStore.getState().pageLayout
       const result = computeAutoLayout({
@@ -809,7 +809,7 @@ export const PagePreview: React.FC = () => {
 
   // Render a single menu item
   const renderItem = useCallback(
-    (item: any, sectionId: string) => {
+    (item: MenuItem, sectionId: string) => {
       const isSelected = selectedItemId === item.id
       const itemNameStyle = pageLayout.typography.itemName
       const itemDescStyle = pageLayout.typography.itemDescription
@@ -875,7 +875,7 @@ export const PagePreview: React.FC = () => {
         letterSpacing: `${itemPriceStyle.letterSpacing}px`,
         lineHeight: itemPriceStyle.lineHeight,
         textTransform: itemPriceStyle.textTransform as any,
-        color: itemPriceStyle.color || pageLayout.colorScheme.accent,
+        color: pageLayout.colorScheme.price || pageLayout.colorScheme.accent,
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }
@@ -1064,7 +1064,7 @@ export const PagePreview: React.FC = () => {
   // Header is skipped for continuation fragments (startItemIndex > 0).
   // Footnote is only shown on the last fragment.
   const renderSectionContent = useCallback(
-    (section: any, layout: SectionLayout) => {
+    (section: MenuSection, layout: SectionLayout) => {
       const sectionTitleStyle = pageLayout.typography.sectionTitle
       const sectionSubtitleStyle = pageLayout.typography.sectionSubtitle
 
@@ -1087,7 +1087,7 @@ export const PagePreview: React.FC = () => {
       }
 
       // Slice BEFORE filtering: endItemIndex was computed against unfiltered items
-      const visibleItems = unfilteredItems.slice(startIdx, endIdx).filter((item: any) => item.isAvailable !== false && !hiddenItemIds.includes(item.id))
+      const visibleItems = unfilteredItems.slice(startIdx, endIdx).filter((item: MenuItem) => item.isAvailable !== false && !hiddenItemIds.includes(item.id))
       const isFirstFragment = startIdx === 0
       const isLastFragment = endIdx >= totalCount
 
@@ -1108,7 +1108,7 @@ export const PagePreview: React.FC = () => {
         lineHeight: sectionTitleStyle.lineHeight,
         textTransform: sectionTitleStyle.textTransform as any,
         textAlign: sectionTitleStyle.textAlign as any,
-        color: sectionTitleStyle.color || pageLayout.colorScheme.accent,
+        color: pageLayout.colorScheme.sectionTitle || pageLayout.colorScheme.accent,
         marginBottom: hasSubtitleContent ? '4px' : '0',
       }
 
@@ -1193,7 +1193,7 @@ export const PagePreview: React.FC = () => {
           )}
 
           <div style={itemsContainerStyle}>
-            {visibleItems.map((item: any) => renderItem(item, section.id))}
+            {visibleItems.map((item: MenuItem) => renderItem(item, section.id))}
           </div>
 
           {/* Footnote — shown below items on the last fragment only */}
@@ -1231,7 +1231,7 @@ export const PagePreview: React.FC = () => {
   // Render a single section fragment (may be full section or split piece)
   // layoutKey is used as React key to distinguish split fragments of the same section
   const renderSectionFragment = useCallback(
-    (section: any, layout: SectionLayout, layoutKey: string) => {
+    (section: MenuSection, layout: SectionLayout, layoutKey: string) => {
       const isSectionSelected = selectedSectionIds.includes(section.id)
       // Per-section color overrides
       const sectionColors = section.colorOverride

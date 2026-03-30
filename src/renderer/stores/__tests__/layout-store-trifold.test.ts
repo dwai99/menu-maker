@@ -10,12 +10,12 @@ import { act } from '@testing-library/react'
  * - setTriFoldPanelSections
  * - updateTriFoldConfig
  * - setHeaderConfig
- * - setHeaderHeight
- * - setSectionTitleDecoration
+ * - updateLayout('headerHeight')
+ * - updateLayout('sectionTitleDecoration')
  * - setPrintMarks
- * - setShowDietaryLegend
- * - setVariantDisplayMode / setVariantSeparator
- * - setSectionDecorations
+ * - updateLayout('showDietaryLegend')
+ * - updateLayout('variantDisplayMode') / updateLayout('variantSeparator')
+ * - updateLayout('sectionDecorations')
  * - undo/redo via temporal middleware
  */
 
@@ -240,37 +240,37 @@ describe('Layout Store - Tri-fold, Header, and Undo/Redo', () => {
         })
     })
 
-    // ── setHeaderHeight ───────────────────────────────────────
-    describe('setHeaderHeight', () => {
+    // ── updateLayout('headerHeight') ──────────────────────────
+    describe('updateLayout headerHeight', () => {
         it('should set header height', () => {
-            act(() => useLayoutStore.getState().setHeaderHeight(200))
+            act(() => useLayoutStore.getState().updateLayout('headerHeight', 200))
             expect(useLayoutStore.getState().pageLayout.headerHeight).toBe(200)
         })
 
         it('should set header height to 0 (auto)', () => {
-            act(() => useLayoutStore.getState().setHeaderHeight(120))
-            act(() => useLayoutStore.getState().setHeaderHeight(0))
+            act(() => useLayoutStore.getState().updateLayout('headerHeight', 120))
+            act(() => useLayoutStore.getState().updateLayout('headerHeight', 0))
             expect(useLayoutStore.getState().pageLayout.headerHeight).toBe(0)
         })
 
         it('should allow various header height values', () => {
             const heights = [80, 120, 160, 240]
             for (const height of heights) {
-                act(() => useLayoutStore.getState().setHeaderHeight(height))
+                act(() => useLayoutStore.getState().updateLayout('headerHeight', height))
                 expect(useLayoutStore.getState().pageLayout.headerHeight).toBe(height)
             }
         })
     })
 
-    // ── setSectionTitleDecoration ─────────────────────────────
-    describe('setSectionTitleDecoration', () => {
+    // ── updateLayout('sectionTitleDecoration') ────────────────
+    describe('updateLayout sectionTitleDecoration', () => {
         it('should set section title decoration to underline-solid', () => {
-            act(() => useLayoutStore.getState().setSectionTitleDecoration('underline-solid'))
+            act(() => useLayoutStore.getState().updateLayout('sectionTitleDecoration', 'underline-solid'))
             expect(useLayoutStore.getState().pageLayout.sectionTitleDecoration).toBe('underline-solid')
         })
 
         it('should set section title decoration to ornamental-flourish', () => {
-            act(() => useLayoutStore.getState().setSectionTitleDecoration('ornamental-flourish'))
+            act(() => useLayoutStore.getState().updateLayout('sectionTitleDecoration', 'ornamental-flourish'))
             expect(useLayoutStore.getState().pageLayout.sectionTitleDecoration).toBe('ornamental-flourish')
         })
 
@@ -284,7 +284,7 @@ describe('Layout Store - Tri-fold, Header, and Undo/Redo', () => {
                 'ornamental-diamond',
             ] as const
             for (const dec of decorations) {
-                act(() => useLayoutStore.getState().setSectionTitleDecoration(dec))
+                act(() => useLayoutStore.getState().updateLayout('sectionTitleDecoration', dec))
                 expect(useLayoutStore.getState().pageLayout.sectionTitleDecoration).toBe(dec)
             }
         })
@@ -316,86 +316,86 @@ describe('Layout Store - Tri-fold, Header, and Undo/Redo', () => {
         })
     })
 
-    // ── setShowDietaryLegend ──────────────────────────────────
-    describe('setShowDietaryLegend', () => {
+    // ── updateLayout('showDietaryLegend') ────────────────────
+    describe('updateLayout showDietaryLegend', () => {
         it('should enable dietary legend', () => {
-            act(() => useLayoutStore.getState().setShowDietaryLegend(true))
+            act(() => useLayoutStore.getState().updateLayout('showDietaryLegend', true))
             expect(useLayoutStore.getState().pageLayout.showDietaryLegend).toBe(true)
         })
 
         it('should disable dietary legend', () => {
-            act(() => useLayoutStore.getState().setShowDietaryLegend(true))
-            act(() => useLayoutStore.getState().setShowDietaryLegend(false))
+            act(() => useLayoutStore.getState().updateLayout('showDietaryLegend', true))
+            act(() => useLayoutStore.getState().updateLayout('showDietaryLegend', false))
             expect(useLayoutStore.getState().pageLayout.showDietaryLegend).toBe(false)
         })
     })
 
-    // ── setVariantDisplayMode and setVariantSeparator ─────────
+    // ── updateLayout variant display/separator ────────────────
     describe('variant display', () => {
         it('should set variant display mode to stacked', () => {
-            act(() => useLayoutStore.getState().setVariantDisplayMode('stacked'))
+            act(() => useLayoutStore.getState().updateLayout('variantDisplayMode', 'stacked'))
             expect(useLayoutStore.getState().pageLayout.variantDisplayMode).toBe('stacked')
         })
 
         it('should set variant display mode to inline', () => {
-            act(() => useLayoutStore.getState().setVariantDisplayMode('inline'))
+            act(() => useLayoutStore.getState().updateLayout('variantDisplayMode', 'inline'))
             expect(useLayoutStore.getState().pageLayout.variantDisplayMode).toBe('inline')
         })
 
         it('should set variant separator to slash', () => {
-            act(() => useLayoutStore.getState().setVariantSeparator('/'))
+            act(() => useLayoutStore.getState().updateLayout('variantSeparator', '/'))
             expect(useLayoutStore.getState().pageLayout.variantSeparator).toBe('/')
         })
 
         it('should set all variant separators', () => {
             const separators = ['/', '·', '|', '—'] as const
             for (const sep of separators) {
-                act(() => useLayoutStore.getState().setVariantSeparator(sep))
+                act(() => useLayoutStore.getState().updateLayout('variantSeparator', sep))
                 expect(useLayoutStore.getState().pageLayout.variantSeparator).toBe(sep)
             }
         })
     })
 
-    // ── setSectionDecorations (array) ─────────────────────────
-    describe('setSectionDecorations', () => {
+    // ── updateLayout('sectionDecorations') (array) ───────────
+    describe('updateLayout sectionDecorations', () => {
         it('should set an array of section decorations', () => {
-            act(() => useLayoutStore.getState().setSectionDecorations(['border', 'shadow']))
+            act(() => useLayoutStore.getState().updateLayout('sectionDecorations', ['border', 'shadow']))
             expect(useLayoutStore.getState().pageLayout.sectionDecorations).toEqual(['border', 'shadow'])
         })
 
         it('should clear section decorations with empty array', () => {
-            act(() => useLayoutStore.getState().setSectionDecorations(['border']))
-            act(() => useLayoutStore.getState().setSectionDecorations([]))
+            act(() => useLayoutStore.getState().updateLayout('sectionDecorations', ['border']))
+            act(() => useLayoutStore.getState().updateLayout('sectionDecorations', []))
             expect(useLayoutStore.getState().pageLayout.sectionDecorations).toEqual([])
         })
     })
 
     // ── Undo/Redo for layout store ────────────────────────────
     describe('undo/redo', () => {
-        it('should undo setPageSize', () => {
+        it('should undo updateLayout pageSize', () => {
             const originalSize = useLayoutStore.getState().pageLayout.pageSize
-            act(() => useLayoutStore.getState().setPageSize('a4'))
+            act(() => useLayoutStore.getState().updateLayout('pageSize', 'a4'))
             act(() => useLayoutStore.temporal.getState().undo())
             expect(useLayoutStore.getState().pageLayout.pageSize).toBe(originalSize)
         })
 
-        it('should redo setPageSize after undo', () => {
-            act(() => useLayoutStore.getState().setPageSize('a4'))
+        it('should redo updateLayout pageSize after undo', () => {
+            act(() => useLayoutStore.getState().updateLayout('pageSize', 'a4'))
             act(() => useLayoutStore.temporal.getState().undo())
             act(() => useLayoutStore.temporal.getState().redo())
             expect(useLayoutStore.getState().pageLayout.pageSize).toBe('a4')
         })
 
-        it('should undo setOrientation', () => {
+        it('should undo updateLayout orientation', () => {
             const original = useLayoutStore.getState().pageLayout.orientation
-            act(() => useLayoutStore.getState().setOrientation('landscape'))
+            act(() => useLayoutStore.getState().updateLayout('orientation', 'landscape'))
             act(() => useLayoutStore.temporal.getState().undo())
             expect(useLayoutStore.getState().pageLayout.orientation).toBe(original)
         })
 
-        it('should undo setColumnCount', () => {
+        it('should undo updateLayout columnCount', () => {
             const original = useLayoutStore.getState().pageLayout.columnCount
-            act(() => useLayoutStore.getState().setColumnCount(3))
+            act(() => useLayoutStore.getState().updateLayout('columnCount', 3))
             act(() => useLayoutStore.temporal.getState().undo())
             expect(useLayoutStore.getState().pageLayout.columnCount).toBe(original)
         })
@@ -414,9 +414,9 @@ describe('Layout Store - Tri-fold, Header, and Undo/Redo', () => {
         })
 
         it('should support multiple undo steps', () => {
-            act(() => useLayoutStore.getState().setPageSize('a4'))
-            act(() => useLayoutStore.getState().setPageSize('a5'))
-            act(() => useLayoutStore.getState().setPageSize('legal'))
+            act(() => useLayoutStore.getState().updateLayout('pageSize', 'a4'))
+            act(() => useLayoutStore.getState().updateLayout('pageSize', 'a5'))
+            act(() => useLayoutStore.getState().updateLayout('pageSize', 'legal'))
 
             act(() => useLayoutStore.temporal.getState().undo())
             expect(useLayoutStore.getState().pageLayout.pageSize).toBe('a5')

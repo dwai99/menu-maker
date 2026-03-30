@@ -50,47 +50,47 @@ describe('Layout Store - Advanced Operations', () => {
     // ── Layout Direction, Item Separator, Price Format ────────
     describe('Layout options', () => {
         it('should set layout direction', () => {
-            act(() => useLayoutStore.getState().setLayoutDirection('horizontal'))
+            act(() => useLayoutStore.getState().updateLayout('layoutDirection', 'horizontal'))
             expect(useLayoutStore.getState().pageLayout.layoutDirection).toBe('horizontal')
         })
 
         it('should set item separator', () => {
-            act(() => useLayoutStore.getState().setItemSeparator('dots'))
+            act(() => useLayoutStore.getState().updateLayout('itemSeparator', 'dots'))
             expect(useLayoutStore.getState().pageLayout.itemSeparator).toBe('dots')
         })
 
         it('should set price format', () => {
-            act(() => useLayoutStore.getState().setPriceFormat('dot-leaders'))
+            act(() => useLayoutStore.getState().updateLayout('priceFormat', 'dot-leaders'))
             expect(useLayoutStore.getState().pageLayout.priceFormat).toBe('dot-leaders')
         })
 
         it('should set section decoration', () => {
-            act(() => useLayoutStore.getState().setSectionDecoration('border'))
+            act(() => useLayoutStore.getState().updateLayout('sectionDecoration', 'border'))
             expect(useLayoutStore.getState().pageLayout.sectionDecoration).toBe('border')
         })
 
         it('should set currency', () => {
-            act(() => useLayoutStore.getState().setCurrency('€'))
+            act(() => useLayoutStore.getState().updateLayout('currency', '€'))
             expect(useLayoutStore.getState().pageLayout.currency).toBe('€')
         })
 
         it('should set background texture', () => {
-            act(() => useLayoutStore.getState().setBackgroundTexture('parchment'))
+            act(() => useLayoutStore.getState().updateLayout('backgroundTexture', 'parchment'))
             expect(useLayoutStore.getState().pageLayout.backgroundTexture).toBe('parchment')
         })
 
         it('should set section divider', () => {
-            act(() => useLayoutStore.getState().setSectionDivider('flourish'))
+            act(() => useLayoutStore.getState().updateLayout('sectionDivider', 'flourish'))
             expect(useLayoutStore.getState().pageLayout.sectionDivider).toBe('flourish')
         })
 
         it('should set page border', () => {
-            act(() => useLayoutStore.getState().setPageBorder('double'))
+            act(() => useLayoutStore.getState().updateLayout('pageBorder', 'double'))
             expect(useLayoutStore.getState().pageLayout.pageBorder).toBe('double')
         })
 
         it('should set section gap', () => {
-            act(() => useLayoutStore.getState().setSectionGap(24))
+            act(() => useLayoutStore.getState().updateLayout('sectionGap', 24))
             expect(useLayoutStore.getState().pageLayout.sectionGap).toBe(24)
         })
     })

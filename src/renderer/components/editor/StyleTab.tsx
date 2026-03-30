@@ -333,6 +333,16 @@ export const StyleTab: React.FC = () => {
               value={pageLayout.colorScheme.border}
               onChange={(color) => handleColorChange('border', color)}
             />
+            <ColorInput
+              label="Section Title"
+              value={pageLayout.colorScheme.sectionTitle || pageLayout.colorScheme.accent}
+              onChange={(color) => handleColorChange('sectionTitle', color)}
+            />
+            <ColorInput
+              label="Price"
+              value={pageLayout.colorScheme.price || pageLayout.colorScheme.accent}
+              onChange={(color) => handleColorChange('price', color)}
+            />
           </div>
         )}
       </div>
