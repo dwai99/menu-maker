@@ -12,6 +12,7 @@ describe('UI Store', () => {
                 selectedSectionId: null,
                 selectedSectionIds: [],
                 selectedItemId: null,
+                selectedFragmentId: null,
                 zoom: 0.75,
                 overflowState: null,
                 autoFitCounter: 0,
@@ -97,6 +98,42 @@ describe('UI Store', () => {
             expect(state.selectedSectionId).toBeNull()
             expect(state.selectedSectionIds).toEqual([])
             expect(state.selectedItemId).toBeNull()
+            expect(state.selectedFragmentId).toBeNull()
+        })
+    })
+
+    // ── Fragment Selection Tests ─────────────────────────────────
+    describe('Fragment Selection', () => {
+        it('selectFragment should set selectedFragmentId and derive selectedSectionId', () => {
+            act(() => useUIStore.getState().selectFragment('sec-1:5'))
+            const state = useUIStore.getState()
+            expect(state.selectedFragmentId).toBe('sec-1:5')
+            expect(state.selectedSectionId).toBe('sec-1')
+            expect(state.selectedSectionIds).toEqual(['sec-1'])
+            expect(state.selectedItemId).toBeNull()
+        })
+
+        it('selectFragment with startItemIndex 0 should work', () => {
+            act(() => useUIStore.getState().selectFragment('sec-abc:0'))
+            const state = useUIStore.getState()
+            expect(state.selectedFragmentId).toBe('sec-abc:0')
+            expect(state.selectedSectionId).toBe('sec-abc')
+        })
+
+        it('selectSection should clear selectedFragmentId', () => {
+            act(() => useUIStore.getState().selectFragment('sec-1:5'))
+            act(() => useUIStore.getState().selectSection('sec-2'))
+            const state = useUIStore.getState()
+            expect(state.selectedFragmentId).toBeNull()
+            expect(state.selectedSectionId).toBe('sec-2')
+        })
+
+        it('clearSelection should clear selectedFragmentId', () => {
+            act(() => useUIStore.getState().selectFragment('sec-1:0'))
+            act(() => useUIStore.getState().clearSelection())
+            const state = useUIStore.getState()
+            expect(state.selectedFragmentId).toBeNull()
+            expect(state.selectedSectionId).toBeNull()
         })
     })
 
@@ -197,6 +234,24 @@ describe('UI Store', () => {
             const initial = useUIStore.getState().autoFitCounter
             act(() => useUIStore.getState().requestAutoFit())
             expect(useUIStore.getState().autoFitCounter).toBe(initial + 1)
+        })
+    })
+
+    // ── Layout Commit Flag Tests ─────────────────────────────
+    describe('Layout Commit Flag', () => {
+        it('should default pendingLayoutCommit to false', () => {
+            expect(useUIStore.getState().pendingLayoutCommit).toBe(false)
+        })
+
+        it('should set pendingLayoutCommit to true', () => {
+            act(() => useUIStore.getState().setPendingLayoutCommit(true))
+            expect(useUIStore.getState().pendingLayoutCommit).toBe(true)
+        })
+
+        it('should set pendingLayoutCommit back to false', () => {
+            act(() => useUIStore.getState().setPendingLayoutCommit(true))
+            act(() => useUIStore.getState().setPendingLayoutCommit(false))
+            expect(useUIStore.getState().pendingLayoutCommit).toBe(false)
         })
     })
 })

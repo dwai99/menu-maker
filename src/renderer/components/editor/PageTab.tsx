@@ -1,10 +1,12 @@
 import React, { useCallback, useState } from 'react';
+import { nanoid } from 'nanoid';
 import { useLayoutStore } from '@/stores/layout-store';
 import { useMenuStore } from '@/stores/menu-store';
 import { useUIStore } from '@/stores/ui-store';
+import type { LayoutView } from '@/models/project';
 import { PAGE_SIZES, PageSizeId, TRI_FOLD_PANEL_LABELS, TRI_FOLD_FRONT_PANELS, TRI_FOLD_BACK_PANELS, createDefaultHeaderConfig } from '@/models/layout';
 import type { ColumnCount, SectionTitleDecoration, TriFoldPanelRole, TriFoldPaperSize, TriFoldType, HeaderLayoutPreset, HeaderConfig } from '@/models/layout';
-import { autoDistributeTriFold } from '@/layout/tri-fold';
+import { autoDistributeTriFold, computeTriFoldLayout } from '@/layout/tri-fold';
 
 import { computeAutoLayout, computeFlowLayout, computeMultiPageLayout } from '@/layout/auto-layout';
 import {
@@ -60,10 +62,62 @@ const AccordionSection: React.FC<AccordionSectionProps> = ({ title, expanded, on
 );
 
 export const PageTab: React.FC = () => {
-  const { pageLayout, setPageSize, setOrientation, setMargins, setColumnCount, setLayoutDirection, setItemSeparator, setPriceFormat, setSectionDecoration, setCurrency, setBackgroundTexture, setSectionDivider, setPageBorder, setSectionGap, setVariantDisplayMode, setVariantSeparator, setSectionDecorations, setSectionLayouts, clearAllSectionLayouts, addPage, removePage, renamePage, setPageColumnCount, enableMultiPageMode, disableMultiPageMode, assignSectionToPage, setSectionTitleDecoration, enableTriFold, disableTriFold, setTriFoldPaperSize, setTriFoldPanelSections, setTriFoldType, updateTriFoldConfig, setHeaderConfig, setPrintMarks, setShowDietaryLegend } =
+  const { pageLayout, setPageSize, setOrientation, setMargins, setColumnCount, setLayoutDirection, setItemSeparator, setPriceFormat, setPricePosition, setSectionDecoration, setCurrency, setBackgroundTexture, setSectionDivider, setPageBorder, setSectionGap, setVariantDisplayMode, setVariantSeparator, setSectionDecorations, setSectionLayouts, clearAllSectionLayouts, addPage, removePage, renamePage, setPageColumnCount, enableMultiPageMode, disableMultiPageMode, assignSectionToPage, setSectionTitleDecoration, enableTriFold, disableTriFold, setTriFoldPaperSize, setTriFoldPanelSections, setTriFoldType, updateTriFoldConfig, setHeaderConfig, setPrintMarks, setShowDietaryLegend, applyBatchUpdate } =
     useLayoutStore();
   const menuData = useMenuStore((s) => s.menuData);
-  const { markDirty, overflowState, selectedSectionIds, setActivePageId } = useUIStore();
+  const { markDirty, overflowState, selectedSectionIds, setActivePageId, setPendingLayoutCommit, layoutViews, activeLayoutViewId, setLayoutViews, setActiveLayoutViewId, switchLayoutView } = useUIStore();
+
+  const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  const switchView = useCallback((viewId: string) => {
+    switchLayoutView(viewId);
+    markDirty();
+  }, [switchLayoutView, markDirty]);
+
+  const addView = useCallback((name: string) => {
+    const currentLayout = useLayoutStore.getState().pageLayout;
+    const newView: LayoutView = {
+      id: nanoid(),
+      name,
+      pageLayout: JSON.parse(JSON.stringify(currentLayout)),
+    };
+    if (layoutViews.length === 0) {
+      // First time: create a view for the current layout too
+      const firstView: LayoutView = {
+        id: nanoid(),
+        name: 'Main Menu',
+        pageLayout: JSON.parse(JSON.stringify(currentLayout)),
+      };
+      setLayoutViews([firstView, newView]);
+      setActiveLayoutViewId(firstView.id);
+    } else {
+      // Save current layout into active view, then add new
+      const updated = layoutViews.map(v =>
+        v.id === activeLayoutViewId ? { ...v, pageLayout: currentLayout } : v
+      );
+      setLayoutViews([...updated, newView]);
+    }
+    markDirty();
+  }, [layoutViews, activeLayoutViewId, setLayoutViews, setActiveLayoutViewId, markDirty]);
+
+  const removeView = useCallback((viewId: string) => {
+    if (layoutViews.length <= 1) return;
+    const remaining = layoutViews.filter(v => v.id !== viewId);
+    setLayoutViews(remaining);
+    if (viewId === activeLayoutViewId) {
+      const next = remaining[0];
+      setActiveLayoutViewId(next.id);
+      useLayoutStore.getState().loadPageLayout(next.pageLayout);
+      useLayoutStore.temporal.getState().clear();
+    }
+    markDirty();
+  }, [layoutViews, activeLayoutViewId, setLayoutViews, setActiveLayoutViewId, markDirty]);
+
+  const renameView = useCallback((viewId: string, name: string) => {
+    setLayoutViews(layoutViews.map(v => v.id === viewId ? { ...v, name } : v));
+    markDirty();
+  }, [layoutViews, setLayoutViews, markDirty]);
 
   // Accordion expanded states — all default to true
   const [isLayoutExpanded, setIsLayoutExpanded] = useState(true);
@@ -72,6 +126,8 @@ export const PageTab: React.FC = () => {
   const [isAppearanceExpanded, setIsAppearanceExpanded] = useState(true);
   const [isPriceVariantsExpanded, setIsPriceVariantsExpanded] = useState(true);
   const [isPrintExpanded, setIsPrintExpanded] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReasoning, setAiReasoning] = useState('');
 
   const handlePageSizeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setPageSize(e.target.value as PageSizeId);
@@ -103,53 +159,228 @@ export const PageTab: React.FC = () => {
   };
 
   const handleAutoLayout = useCallback(() => {
-    // Check if there are existing manual splits (continuation fragments)
-    const currentLayouts = useLayoutStore.getState().pageLayout.sectionLayouts || [];
-    const hasSplits = currentLayouts.some((l) => (l.startItemIndex ?? 0) > 0);
-
-    let result;
-    if (pageLayout.pages) {
-      result = computeMultiPageLayout({
-        pages: pageLayout.pages,
+    if (pageLayout.triFold?.enabled) {
+      // Read fresh state to avoid stale closure issues
+      const currentLayout = useLayoutStore.getState().pageLayout;
+      const sIds = menuData.sections.map((s) => s.id);
+      const dist = autoDistributeTriFold(sIds, menuData.sections, currentLayout);
+      const store = useLayoutStore.getState();
+      for (const [panel, ids] of Object.entries(dist)) {
+        store.setTriFoldPanelSections(panel as TriFoldPanelRole, ids as string[]);
+      }
+      // Read fresh state after panel assignments update
+      const freshLayout = useLayoutStore.getState().pageLayout;
+      const result = computeTriFoldLayout({
         sections: menuData.sections,
-        pageLayout,
+        pageLayout: freshLayout,
         menuData,
       });
-    } else if (hasSplits) {
-      // Use flow layout when splits exist — treemap can't produce splits
-      result = computeFlowLayout({
-        sections: menuData.sections,
-        pageLayout,
-        menuData,
-      });
+      setSectionLayouts(result.sectionLayouts);
+      setPendingLayoutCommit(true);
+      if (result.fontScale < 1.0) {
+        const t = freshLayout.typography;
+        for (const role of Object.keys(t) as (keyof typeof t)[]) {
+          const current = t[role];
+          store.setTypography(role, {
+            fontSize: Math.max(6, Math.round(current.fontSize * result.fontScale)),
+          });
+        }
+      }
     } else {
-      result = computeAutoLayout({
-        sections: menuData.sections,
-        pageLayout,
-        menuData,
-      });
-    }
-
-    // Apply section layouts (polygon positioning, possibly with splits)
-    setSectionLayouts(result.sectionLayouts);
-    // Apply font scaling if the algorithm needed to shrink fonts
-    if (result.fontScale < 1.0) {
-      const layoutStore = useLayoutStore.getState();
-      const t = pageLayout.typography;
-      for (const role of Object.keys(t) as (keyof typeof t)[]) {
-        const current = t[role];
-        layoutStore.setTypography(role, {
-          fontSize: Math.max(6, Math.round(current.fontSize * result.fontScale)),
-        });
+      const result = pageLayout.pages
+        ? computeMultiPageLayout({
+            pages: pageLayout.pages,
+            sections: menuData.sections,
+            pageLayout,
+            menuData,
+          })
+        : computeAutoLayout({
+            sections: menuData.sections,
+            pageLayout,
+            menuData,
+          });
+      setSectionLayouts(result.sectionLayouts);
+      setPendingLayoutCommit(true);
+      if (result.fontScale < 1.0) {
+        const layoutStore = useLayoutStore.getState();
+        const t = pageLayout.typography;
+        for (const role of Object.keys(t) as (keyof typeof t)[]) {
+          const current = t[role];
+          layoutStore.setTypography(role, {
+            fontSize: Math.max(6, Math.round(current.fontSize * result.fontScale)),
+          });
+        }
       }
     }
     markDirty();
-  }, [menuData, pageLayout, setSectionLayouts, markDirty]);
+  }, [menuData, pageLayout, setSectionLayouts, setPendingLayoutCommit, markDirty]);
+
+  // Re-run auto layout reading fresh state from the store (used after direction change
+  // so the new direction value is captured rather than the stale closure)
+  const handleAutoLayoutAfterDirectionChange = useCallback(() => {
+    // Allow the store to flush the direction update first
+    requestAnimationFrame(() => {
+      const freshLayout = useLayoutStore.getState().pageLayout
+      const freshMenu = useMenuStore.getState().menuData
+      const result = freshLayout.triFold?.enabled
+        ? computeTriFoldLayout({
+            sections: freshMenu.sections,
+            pageLayout: freshLayout,
+            menuData: freshMenu,
+          })
+        : freshLayout.pages
+          ? computeMultiPageLayout({
+              pages: freshLayout.pages,
+              sections: freshMenu.sections,
+              pageLayout: freshLayout,
+              menuData: freshMenu,
+            })
+          : computeAutoLayout({
+              sections: freshMenu.sections,
+              pageLayout: freshLayout,
+              menuData: freshMenu,
+            })
+      setSectionLayouts(result.sectionLayouts)
+      setPendingLayoutCommit(true)
+      if (result.fontScale < 1.0) {
+        const layoutStore = useLayoutStore.getState()
+        const t = freshLayout.typography
+        for (const role of Object.keys(t) as (keyof typeof t)[]) {
+          const current = t[role]
+          layoutStore.setTypography(role, {
+            fontSize: Math.max(6, Math.round(current.fontSize * result.fontScale)),
+          })
+        }
+      }
+      markDirty()
+    })
+  }, [setSectionLayouts, setPendingLayoutCommit, markDirty])
+
+  const handleFreeformLayout = useCallback(() => {
+    // If explicit layouts already exist (e.g. from a column layout), keep them
+    // and just switch to columnCount 1 for freeform drag/resize.
+    // Only generate new layouts if none exist.
+    if ((pageLayout.sectionLayouts?.length ?? 0) > 0) {
+      setColumnCount(1);
+    } else {
+      const result = computeFlowLayout({
+        sections: menuData.sections,
+        pageLayout: { ...pageLayout, columnCount: 1 },
+        menuData,
+      });
+      setColumnCount(1);
+      setSectionLayouts(result.sectionLayouts);
+      setPendingLayoutCommit(true);
+    }
+    markDirty();
+  }, [menuData, pageLayout, setColumnCount, setSectionLayouts, setPendingLayoutCommit, markDirty]);
 
   const handleClearLayout = useCallback(() => {
     clearAllSectionLayouts();
     markDirty();
   }, [clearAllSectionLayouts, markDirty]);
+
+  const handleAILayout = useCallback(async () => {
+    setAiLoading(true);
+    setAiReasoning('');
+    try {
+      // Build content summary
+      const pageDims = PAGE_SIZES[pageLayout.pageSize];
+      const pageW = pageLayout.orientation === 'portrait' ? pageDims.width : pageDims.height;
+      const pageH = pageLayout.orientation === 'portrait' ? pageDims.height : pageDims.width;
+      const lines: string[] = [
+        `Menu content:`,
+        `Page: ${pageDims?.label ?? pageLayout.pageSize}, ${pageLayout.orientation} (${pageW}" × ${pageH}")`,
+        `Sections:`,
+      ];
+      let totalItems = 0;
+      let totalDescLen = 0;
+      let priceCount = 0;
+      for (const section of menuData.sections) {
+        const itemCount = section.items.length;
+        const withDesc = section.items.filter((it: any) => it.description?.trim()).length;
+        const avgDescLen = withDesc > 0 ? Math.round(section.items.reduce((sum: number, it: any) => sum + (it.description?.trim()?.length || 0), 0) / withDesc) : 0;
+        const withPrice = section.items.filter((it: any) => it.price?.trim()).length;
+        lines.push(`- "${section.title}" (${itemCount} items, ${withDesc} with descriptions avg ${avgDescLen} chars, ${withPrice} with prices)`);
+        totalItems += itemCount;
+        totalDescLen += section.items.reduce((sum: number, it: any) => sum + (it.description?.trim()?.length || 0), 0);
+        priceCount += withPrice;
+      }
+      const avgDesc = totalItems > 0 ? Math.round(totalDescLen / totalItems) : 0;
+      lines.push(`Total: ${totalItems} items, avg description length: ${avgDesc} chars, ${priceCount} with prices`);
+      const contentSummary = lines.join('\n');
+
+      const result = await window.electronAPI.aiSuggestLayout(contentSummary);
+      if (!result.success || !result.suggestion) {
+        alert(result.error || 'AI layout suggestion failed.');
+        return;
+      }
+
+      const s = result.suggestion;
+
+      // Build batch update for AI-suggested parameters (single undo step)
+      const batchUpdates: Partial<import('@/models/layout').PageLayout> = {
+        columnCount: s.columnCount as ColumnCount,
+        layoutDirection: s.layoutDirection as LayoutDirection,
+        orientation: s.orientation as Orientation,
+      };
+
+      // Apply font scale into typography if not 1.0
+      if (s.fontScale !== 1.0) {
+        const t = pageLayout.typography;
+        const scaledTypography: any = {};
+        for (const role of Object.keys(t) as (keyof typeof t)[]) {
+          scaledTypography[role] = { fontSize: Math.max(6, Math.round(t[role].fontSize * s.fontScale)) };
+        }
+        batchUpdates.typography = scaledTypography;
+      }
+
+      applyBatchUpdate(batchUpdates);
+
+      // Run auto layout with fresh state (2nd undo step for positions)
+      requestAnimationFrame(() => {
+        const freshLayout = useLayoutStore.getState().pageLayout;
+        const freshMenu = useMenuStore.getState().menuData;
+        const layoutResult = freshLayout.pages
+          ? computeMultiPageLayout({
+              pages: freshLayout.pages,
+              sections: freshMenu.sections,
+              pageLayout: freshLayout,
+              menuData: freshMenu,
+            })
+          : computeAutoLayout({
+              sections: freshMenu.sections,
+              pageLayout: freshLayout,
+              menuData: freshMenu,
+            });
+        setSectionLayouts(layoutResult.sectionLayouts);
+        setPendingLayoutCommit(true);
+        if (layoutResult.fontScale < 1.0) {
+          const store = useLayoutStore.getState();
+          const typo = freshLayout.typography;
+          for (const role of Object.keys(typo) as (keyof typeof typo)[]) {
+            const current = typo[role];
+            store.setTypography(role, {
+              fontSize: Math.max(6, Math.round(current.fontSize * layoutResult.fontScale)),
+            });
+          }
+        }
+        markDirty();
+      });
+
+      // Show reasoning
+      if (s.reasoning) {
+        setAiReasoning(s.reasoning);
+        setTimeout(() => setAiReasoning(''), 8000);
+      }
+    } catch (err: any) {
+      alert(`AI Layout error: ${err.message}`);
+    } finally {
+      setAiLoading(false);
+    }
+  }, [menuData, pageLayout, applyBatchUpdate, setSectionLayouts, setPendingLayoutCommit, markDirty]);
+
+  const isTriFold = !!pageLayout.triFold?.enabled;
 
   const overflowInches = overflowState
     ? (overflowState.overflowAmount / 96).toFixed(1)
@@ -157,6 +388,70 @@ export const PageTab: React.FC = () => {
 
   return (
     <div className="p-6 space-y-4 overflow-y-auto h-full">
+      {/* ── Layout Views ── */}
+      <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden shadow-sm p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Layout Views</h3>
+          <button
+            type="button"
+            onClick={() => addView(`View ${layoutViews.length + 1}`)}
+            className="px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 rounded transition-colors"
+          >
+            + Add View
+          </button>
+        </div>
+        {layoutViews.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {layoutViews.map((view) => (
+              <div key={view.id} className="flex items-center group">
+                {renamingViewId === view.id ? (
+                  <input
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => { renameView(view.id, renameValue.trim() || view.name); setRenamingViewId(null) }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { renameView(view.id, renameValue.trim() || view.name); setRenamingViewId(null) }
+                      if (e.key === 'Escape') setRenamingViewId(null)
+                    }}
+                    className="px-2 py-1 text-xs border border-amber-400 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-500 w-24"
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => switchView(view.id)}
+                    onDoubleClick={() => { setRenamingViewId(view.id); setRenameValue(view.name) }}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                      view.id === activeLayoutViewId
+                        ? 'bg-amber-50 text-amber-800 border-amber-600'
+                        : 'bg-white text-neutral-600 border-neutral-300 hover:border-amber-400'
+                    }`}
+                    title="Click to switch, double-click to rename"
+                  >
+                    {view.name}
+                  </button>
+                )}
+                {layoutViews.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeView(view.id)}
+                    className="ml-0.5 opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-500 text-xs transition-all"
+                    title="Remove view"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-neutral-400 italic">
+            One layout. Add a view to create alternate layouts (e.g., tri-fold) sharing the same menu content.
+          </p>
+        )}
+      </div>
+
       {/* ── Always-visible: Overflow Status + Auto Layout ── */}
       <div className="space-y-3">
         {overflowState && (
@@ -183,22 +478,36 @@ export const PageTab: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={handleAILayout}
+            disabled={aiLoading}
+            title="Uses AI to suggest optimal layout parameters"
+            className="flex-1 px-4 py-2.5 text-sm font-semibold text-amber-700 bg-white border-2 border-amber-600 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {aiLoading ? 'Thinking...' : 'AI Layout'}
+          </button>
+          <button
+            type="button"
             onClick={handleClearLayout}
             className="px-4 py-2.5 text-sm font-medium text-neutral-600 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 transition-colors"
           >
             Clear
           </button>
         </div>
+        {aiReasoning && (
+          <p className="text-xs text-neutral-500 bg-neutral-50 px-3 py-2 rounded-lg border border-neutral-200">
+            {aiReasoning}
+          </p>
+        )}
       </div>
 
       {/* ── 1. Layout ── */}
       <AccordionSection
-        title="Layout"
+        title="Columns &amp; Layout"
         expanded={isLayoutExpanded}
         onToggle={() => setIsLayoutExpanded(!isLayoutExpanded)}
       >
-        {/* Arrange — align & distribute (visible when 2+ sections selected with explicit layouts) */}
-        {pageLayout.sectionLayouts.length >= 2 && (
+        {/* Arrange — align & distribute (visible when 2+ sections multi-selected with explicit layouts, not in tri-fold or column mode) */}
+        {!isTriFold && pageLayout.sectionLayouts.length >= 2 && selectedSectionIds.length >= 2 && (
           <ArrangeButtons
             allLayouts={pageLayout.sectionLayouts}
             selectedIds={selectedSectionIds}
@@ -206,8 +515,8 @@ export const PageTab: React.FC = () => {
           />
         )}
 
-        {/* Pages Management */}
-        <PagesSection
+        {/* Pages Management (not applicable in tri-fold mode) */}
+        {!isTriFold && <PagesSection
           pages={pageLayout.pages}
           onToggle={(enabled) => {
             if (enabled) {
@@ -236,24 +545,38 @@ export const PageTab: React.FC = () => {
           onRemovePage={(id) => { removePage(id); markDirty(); }}
           onRenamePage={(id, name) => { renamePage(id, name); markDirty(); }}
           onSetColumnCount={(id, count) => { setPageColumnCount(id, count); markDirty(); }}
-        />
+        />}
 
         {/* Columns */}
         {!pageLayout.triFold?.enabled && (
           <div className="space-y-3">
             <label className="block text-sm font-semibold text-neutral-700">
-              Columns
+              Layout
             </label>
             <div className="flex">
+              <button
+                type="button"
+                onClick={handleFreeformLayout}
+                className={`px-3 py-2 text-sm border rounded-l-lg ${
+                  pageLayout.columnCount === 1 && (pageLayout.sectionLayouts?.length ?? 0) > 0
+                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                    : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+                }`}
+              >
+                Free
+              </button>
               {([1, 2, 3, 4, 5, 6] as const).map((n) => (
                 <button
                   key={n}
                   type="button"
-                  onClick={() => { setColumnCount(n as ColumnCount); markDirty(); }}
-                  className={`px-3 py-2 text-sm border ${
-                    n > 1 ? 'border-l-0' : ''
-                  } ${n === 1 ? 'rounded-l-lg' : ''} ${n === 6 ? 'rounded-r-lg' : ''} ${
-                    pageLayout.columnCount === n
+                  onClick={() => {
+                    setColumnCount(n as ColumnCount);
+                    // Clicking "1" returns to flow mode (clear explicit layouts)
+                    if (n === 1) clearAllSectionLayouts();
+                    markDirty();
+                  }}
+                  className={`px-3 py-2 text-sm border border-l-0 ${n === 6 ? 'rounded-r-lg' : ''} ${
+                    pageLayout.columnCount === n && (n > 1 || (pageLayout.sectionLayouts?.length ?? 0) === 0)
                       ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
                       : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
                   }`}
@@ -265,55 +588,59 @@ export const PageTab: React.FC = () => {
           </div>
         )}
 
-        {/* Direction */}
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-neutral-700">
-            Direction
-          </label>
-          <div className="flex">
-            <button
-              type="button"
-              onClick={() => { setLayoutDirection('vertical'); markDirty(); }}
-              className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
-                pageLayout.layoutDirection !== 'horizontal'
-                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
-                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              ↓ Vertical
-            </button>
-            <button
-              type="button"
-              onClick={() => { setLayoutDirection('horizontal'); markDirty(); }}
-              className={`px-3 py-2 text-sm border rounded-r-lg ${
-                pageLayout.layoutDirection === 'horizontal'
-                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
-                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              → Horizontal
-            </button>
+        {/* Direction (not applicable in tri-fold — always vertical within panels) */}
+        {!isTriFold && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-neutral-700">
+              Direction
+            </label>
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => { setLayoutDirection('vertical'); handleAutoLayoutAfterDirectionChange(); }}
+                className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
+                  pageLayout.layoutDirection !== 'horizontal'
+                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                    : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+                }`}
+              >
+                ↓ Vertical
+              </button>
+              <button
+                type="button"
+                onClick={() => { setLayoutDirection('horizontal'); handleAutoLayoutAfterDirectionChange(); }}
+                className={`px-3 py-2 text-sm border rounded-r-lg ${
+                  pageLayout.layoutDirection === 'horizontal'
+                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                    : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+                }`}
+              >
+                → Horizontal
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Section Spacing */}
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-neutral-700">
-            Section Spacing
-          </label>
-          <div className="flex items-center gap-3">
-            <input
-              type="range"
-              min={0}
-              max={48}
-              step={4}
-              value={pageLayout.sectionGap ?? 16}
-              onChange={(e) => { setSectionGap(parseInt(e.target.value)); markDirty(); }}
-              className="flex-1"
-            />
-            <span className="text-sm text-neutral-500 w-8 text-right">{pageLayout.sectionGap ?? 16}px</span>
+        {/* Section Spacing (not applicable in tri-fold — panel padding handles spacing) */}
+        {!isTriFold && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-neutral-700">
+              Section Spacing
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={48}
+                step={4}
+                value={pageLayout.sectionGap ?? 16}
+                onChange={(e) => { setSectionGap(parseInt(e.target.value)); markDirty(); }}
+                className="flex-1"
+              />
+              <span className="text-sm text-neutral-500 w-8 text-right">{pageLayout.sectionGap ?? 16}px</span>
+            </div>
           </div>
-        </div>
+        )}
       </AccordionSection>
 
       {/* ── 2. Page Format ── */}
@@ -322,54 +649,58 @@ export const PageTab: React.FC = () => {
         expanded={isPageFormatExpanded}
         onToggle={() => setIsPageFormatExpanded(!isPageFormatExpanded)}
       >
-        {/* Page Size */}
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-neutral-700">
-            Page Size
-          </label>
-          <select
-            value={pageLayout.pageSize}
-            onChange={handlePageSizeChange}
-            className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-          >
-            {Object.entries(PAGE_SIZES).map(([id, { label }]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Orientation */}
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-neutral-700">
-            Orientation
-          </label>
-          <div className="flex">
-            <button
-              type="button"
-              onClick={() => handleOrientationChange('portrait')}
-              className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
-                pageLayout.orientation === 'portrait'
-                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
-                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
-              }`}
+        {/* Page Size (tri-fold has its own paper size selector) */}
+        {!isTriFold && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-neutral-700">
+              Page Size
+            </label>
+            <select
+              value={pageLayout.pageSize}
+              onChange={handlePageSizeChange}
+              className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             >
-              Portrait
-            </button>
-            <button
-              type="button"
-              onClick={() => handleOrientationChange('landscape')}
-              className={`px-3 py-2 text-sm border rounded-r-lg ${
-                pageLayout.orientation === 'landscape'
-                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
-                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
-              }`}
-            >
-              Landscape
-            </button>
+              {Object.entries(PAGE_SIZES).map(([id, { label }]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
-        </div>
+        )}
+
+        {/* Orientation (tri-fold is always landscape) */}
+        {!isTriFold && (
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-neutral-700">
+              Orientation
+            </label>
+            <div className="flex">
+              <button
+                type="button"
+                onClick={() => handleOrientationChange('portrait')}
+                className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
+                  pageLayout.orientation === 'portrait'
+                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                    : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+                }`}
+              >
+                Portrait
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOrientationChange('landscape')}
+                className={`px-3 py-2 text-sm border rounded-r-lg ${
+                  pageLayout.orientation === 'landscape'
+                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                    : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+                }`}
+              >
+                Landscape
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Margins */}
         <div className="space-y-3">
@@ -424,12 +755,14 @@ export const PageTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Header Layout */}
-        <HeaderLayoutSection
-          headerConfig={pageLayout.headerConfig ?? createDefaultHeaderConfig()}
-          hasLogo={!!menuData.logo}
-          onChange={(cfg) => { setHeaderConfig(cfg); markDirty(); }}
-        />
+        {/* Header Layout (tri-fold uses cover panel for title/logo instead) */}
+        {!isTriFold && (
+          <HeaderLayoutSection
+            headerConfig={pageLayout.headerConfig ?? createDefaultHeaderConfig()}
+            hasLogo={!!menuData.logo}
+            onChange={(cfg) => { setHeaderConfig(cfg); markDirty(); }}
+          />
+        )}
       </AccordionSection>
 
       {/* ── 3. Tri-Fold Brochure ── */}
@@ -446,13 +779,22 @@ export const PageTab: React.FC = () => {
               onChange={(e) => {
                 if (e.target.checked) {
                   enableTriFold('letter');
-                  // Auto-distribute sections
+                  // Read fresh state after enableTriFold so triFold.enabled is true
+                  const freshLayout = useLayoutStore.getState().pageLayout;
                   const sIds = menuData.sections.map((s) => s.id);
-                  const dist = autoDistributeTriFold(sIds);
+                  const dist = autoDistributeTriFold(sIds, menuData.sections, freshLayout);
                   const store = useLayoutStore.getState();
                   for (const [panel, ids] of Object.entries(dist)) {
                     store.setTriFoldPanelSections(panel as TriFoldPanelRole, ids as string[]);
                   }
+                  // Run tri-fold layout after store updates flush
+                  requestAnimationFrame(() => {
+                    const fl = useLayoutStore.getState().pageLayout;
+                    const fm = useMenuStore.getState().menuData;
+                    const r = computeTriFoldLayout({ sections: fm.sections, pageLayout: fl, menuData: fm });
+                    setSectionLayouts(r.sectionLayouts);
+                    setPendingLayoutCommit(true);
+                  });
                 } else {
                   disableTriFold();
                 }
@@ -474,7 +816,17 @@ export const PageTab: React.FC = () => {
                   <button
                     key={ps}
                     type="button"
-                    onClick={() => { setTriFoldPaperSize(ps); markDirty(); }}
+                    onClick={() => {
+                      setTriFoldPaperSize(ps);
+                      requestAnimationFrame(() => {
+                        const fl = useLayoutStore.getState().pageLayout;
+                        const fm = useMenuStore.getState().menuData;
+                        const r = computeTriFoldLayout({ sections: fm.sections, pageLayout: fl, menuData: fm });
+                        setSectionLayouts(r.sectionLayouts);
+                        setPendingLayoutCommit(true);
+                      });
+                      markDirty();
+                    }}
                     className={`px-3 py-1.5 text-sm border rounded-lg ${
                       pageLayout.triFold?.paperSize === ps
                         ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
@@ -491,14 +843,24 @@ export const PageTab: React.FC = () => {
                 <label className="block text-xs font-semibold text-neutral-500 uppercase tracking-wide">Fold Type</label>
                 <div className="flex gap-1">
                   {([
-                    ['letter-fold', 'Letter Fold', '|||'],
-                    ['z-fold', 'Z-Fold', 'Z'],
-                    ['gate-fold', 'Gate Fold', '|...|'],
-                  ] as [TriFoldType, string, string][]).map(([type, label, icon], i, arr) => (
+                    ['letter-fold', 'Standard', 'C', 'Right panel folds in'],
+                    ['z-fold', 'Accordion', 'Z', 'Equal panels, zigzag'],
+                    ['gate-fold', 'Gate Fold', '|__|', 'Wide center, sides fold in'],
+                  ] as [TriFoldType, string, string, string][]).map(([type, label, icon, subtitle], i, arr) => (
                     <button
                       key={type}
                       type="button"
-                      onClick={() => { setTriFoldType(type); markDirty(); }}
+                      onClick={() => {
+                        setTriFoldType(type);
+                        // Recompute layout with new fold geometry (panel widths change)
+                        requestAnimationFrame(() => {
+                          const fl = useLayoutStore.getState().pageLayout;
+                          const fm = useMenuStore.getState().menuData;
+                          const r = computeTriFoldLayout({ sections: fm.sections, pageLayout: fl, menuData: fm });
+                          setSectionLayouts(r.sectionLayouts);
+                        });
+                        markDirty();
+                      }}
                       className={`flex-1 px-2 py-2 text-xs border ${
                         i > 0 ? 'border-l-0' : ''
                       } ${i === 0 ? 'rounded-l-lg' : ''} ${i === arr.length - 1 ? 'rounded-r-lg' : ''} ${
@@ -509,6 +871,7 @@ export const PageTab: React.FC = () => {
                     >
                       <div className="font-mono text-xs mb-0.5">{icon}</div>
                       <div>{label}</div>
+                      <div className="text-[9px] text-neutral-400 mt-0.5 leading-tight">{subtitle}</div>
                     </button>
                   ))}
                 </div>
@@ -567,10 +930,18 @@ export const PageTab: React.FC = () => {
                 type="button"
                 onClick={() => {
                   const sIds = menuData.sections.map((s) => s.id);
-                  const dist = autoDistributeTriFold(sIds);
+                  const dist = autoDistributeTriFold(sIds, menuData.sections, pageLayout);
                   for (const [panel, ids] of Object.entries(dist)) {
                     setTriFoldPanelSections(panel as TriFoldPanelRole, ids as string[]);
                   }
+                  // Run tri-fold layout after store updates flush
+                  requestAnimationFrame(() => {
+                    const fl = useLayoutStore.getState().pageLayout;
+                    const fm = useMenuStore.getState().menuData;
+                    const r = computeTriFoldLayout({ sections: fm.sections, pageLayout: fl, menuData: fm });
+                    setSectionLayouts(r.sectionLayouts);
+                    setPendingLayoutCommit(true);
+                  });
                   markDirty();
                 }}
                 className="w-full px-3 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
@@ -922,6 +1293,38 @@ export const PageTab: React.FC = () => {
               Dot Leaders
             </button>
           </div>
+        </div>
+
+        {/* Price Position */}
+        <div className="space-y-3">
+          <label className="block text-sm font-semibold text-neutral-700">
+            Price Position
+          </label>
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => { setPricePosition('inline'); markDirty(); }}
+              className={`px-3 py-2 text-sm border border-r-0 rounded-l-lg ${
+                (pageLayout.pricePosition || 'inline') === 'inline'
+                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+              }`}
+            >
+              Beside Name
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPricePosition('below'); markDirty(); }}
+              className={`px-3 py-2 text-sm border rounded-r-lg ${
+                pageLayout.pricePosition === 'below'
+                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-medium'
+                  : 'border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50'
+              }`}
+            >
+              Below Name
+            </button>
+          </div>
+          <p className="text-xs text-neutral-400">Where prices appear relative to the item name</p>
         </div>
 
         {/* Variant Display */}

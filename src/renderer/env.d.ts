@@ -11,10 +11,14 @@ interface ElectronAPI {
   showOpenImageDialog: () => Promise<{ canceled: boolean; filePaths?: string[] }>
   showOpenImportImageDialog: () => Promise<{ canceled: boolean; filePaths?: string[] }>
 
-  parsePdf: (filePath: string) => Promise<{ success: boolean; text?: string; numPages?: number; error?: string }>
+  parsePdf: (filePath: string) => Promise<{ success: boolean; text?: string; menuData?: any; numPages?: number; error?: string }>
+  ocrImage: (filePath: string) => Promise<{ success: boolean; text?: string; menuData?: any; error?: string }>
+  onOcrProgress: (callback: (data: { progress: number; message: string }) => void) => () => void
   exportPdf: (options: { pageWidth: number; pageHeight: number }) => Promise<{ success: boolean; filePath?: string; error?: string }>
   exportImage: (options: { pageWidth: number; pageHeight: number; format: 'png' | 'jpeg' }) => Promise<{ success: boolean; filePath?: string; error?: string }>
   saveImageData: (options: { dataUrl: string; format: 'png' | 'jpeg'; defaultName: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+  showSaveDirectoryDialog: () => Promise<{ canceled: boolean; directoryPath?: string }>
+  saveImageToPath: (options: { dataUrl: string; filePath: string }) => Promise<{ success: boolean; error?: string }>
   printPage: () => Promise<{ success: boolean; error?: string }>
 
   saveCustomTemplate: (name: string, projectJson: string) => Promise<{ success: boolean; filePath?: string; error?: string }>
@@ -40,6 +44,13 @@ interface ElectronAPI {
   getRecentFiles: () => Promise<string[]>
   addRecentFile: (filePath: string) => Promise<void>
   onMenuOpenRecent: (callback: (filePath: string) => void) => () => void
+
+  // AI layout suggestion
+  aiSuggestLayout: (contentSummary: string) => Promise<{
+    success: boolean
+    suggestion?: { columnCount: number; layoutDirection: string; orientation: string; fontScale: number; reasoning: string }
+    error?: string
+  }>
 
   // Settings
   getSetting: (key: string) => Promise<any>

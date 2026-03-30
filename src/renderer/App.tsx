@@ -14,10 +14,16 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useOverflowDetection } from './hooks/useOverflowDetection'
 import { useMenuStore } from './stores/menu-store'
 import { useLayoutStore } from './stores/layout-store'
-import { useUIStore } from './stores/ui-store'
+import { useUIStore, initPreferences } from './stores/ui-store'
 import { stylePresets } from './templates/style-presets'
 import type { MenuTemplate } from './templates'
 import type { WelcomeWizardResult } from './components/onboarding/WelcomeWizard'
+
+// Expose stores on window in dev mode for e2e testing
+if (import.meta.env.DEV) {
+  ;(window as any).__menuStore = useMenuStore
+  ;(window as any).__layoutStore = useLayoutStore
+}
 
 export default function App() {
   const [showTemplates, setShowTemplates] = useState(false)
@@ -37,6 +43,9 @@ export default function App() {
   useUndoRedo()
   useOverflowDetection()
   useKeyboardShortcuts()
+
+  // Load preferences from settings.json on startup
+  useEffect(() => { initPreferences() }, [])
 
   // Check if this is the first launch and show wizard if so
   useEffect(() => {

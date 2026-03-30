@@ -78,9 +78,9 @@ describe('Menu Models', () => {
             }
         })
 
-        it('should have a footer', () => {
+        it('should have an empty footer by default', () => {
             const menu = createDefaultMenuData()
-            expect(menu.footer).toBeTruthy()
+            expect(menu.footer).toBe('')
         })
 
         it('should not have a logo by default', () => {

@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import type { PricePosition } from './layout'
 
 export interface PriceVariant {
   id: string      // nanoid
@@ -40,7 +41,9 @@ export interface MenuItem {
   badges?: ItemBadge[]
   isHighlighted?: boolean
   variants?: PriceVariant[]
+  pricePosition?: PricePosition
   isAvailable: boolean
+  customRender?: string  // HTML string — when set, replaces structured name/desc/price in preview
 }
 
 export interface SectionColorOverride {
@@ -66,6 +69,86 @@ export interface LogoData {
   y: number        // percentage from top of content area (0-100)
 }
 
+export interface PageImage {
+  id: string              // nanoid
+  dataUrl: string         // base64 data URL
+  width: number           // display width in px
+  height: number          // display height in px
+  x: number               // % from left of content area (0-100)
+  y: number               // % from top of content area (0-100)
+  opacity: number         // 0-100
+  layer: 'behind' | 'front'  // z-order relative to sections
+  pageIndex: number       // which page (0-based)
+  label?: string          // user label for list identification
+}
+
+export function createPageImage(dataUrl: string, width: number, height: number): PageImage {
+  return { id: nanoid(), dataUrl, width, height, x: 50, y: 50, opacity: 100, layer: 'front', pageIndex: 0 }
+}
+
+// ── Text Frames ───────────────────────────────────────────────────────
+
+export interface TextFrameStyle {
+  fontFamily: string
+  fontSize: number       // pt
+  fontWeight: number
+  color: string
+  backgroundColor: string  // 'transparent' or hex
+  borderColor: string      // 'transparent' or hex
+  borderWidth: number      // px
+  borderRadius: number     // px
+  textAlign: 'left' | 'center' | 'right'
+  padding: number          // px
+  lineHeight: number       // multiplier (e.g. 1.4)
+  fontStyle: 'normal' | 'italic'
+}
+
+export interface TextFrame {
+  id: string
+  content: string          // plain text (multi-line)
+  x: number                // % from left of content area (0-100)
+  y: number                // % from top of content area (0-100)
+  width: number            // px
+  height: number           // px
+  pageIndex: number        // which page (0-based)
+  style: TextFrameStyle
+  layer: 'behind' | 'front'
+  opacity: number          // 0-100
+  label?: string           // user label for list identification
+}
+
+export const DEFAULT_TEXT_FRAME_STYLE: TextFrameStyle = {
+  fontFamily: 'Inter',
+  fontSize: 12,
+  fontWeight: 400,
+  color: '#000000',
+  backgroundColor: 'transparent',
+  borderColor: 'transparent',
+  borderWidth: 0,
+  borderRadius: 0,
+  textAlign: 'center',
+  padding: 8,
+  lineHeight: 1.4,
+  fontStyle: 'normal',
+}
+
+export function createTextFrame(): TextFrame {
+  return {
+    id: nanoid(),
+    content: '',
+    x: 50,
+    y: 50,
+    width: 200,
+    height: 60,
+    pageIndex: 0,
+    style: { ...DEFAULT_TEXT_FRAME_STYLE },
+    layer: 'front',
+    opacity: 100,
+  }
+}
+
+// ── Header Element Positioning ────────────────────────────────────────
+
 export interface HeaderElementPosition {
   x: number   // % of content area width (0-100)
   y: number   // % of content area height (0-100)
@@ -80,6 +163,9 @@ export interface MenuData {
   logo?: LogoData
   titlePosition?: HeaderElementPosition
   subtitlePosition?: HeaderElementPosition
+  dividerPosition?: HeaderElementPosition
+  pageImages?: PageImage[]
+  textFrames?: TextFrame[]
 }
 
 export function createMenuItem(): MenuItem {
@@ -154,6 +240,6 @@ export function createDefaultMenuData(): MenuData {
         ],
       },
     ],
-    footer: 'February 12, 2026',
+    footer: '',
   }
 }

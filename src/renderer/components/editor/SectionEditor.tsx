@@ -90,10 +90,13 @@ export const SectionEditor: React.FC<SectionEditorProps> = ({ section }) => {
   const [isExpanded, setIsExpanded] = useState(true)
   const { updateSection, removeSection, addItem, reorderItems, duplicateSection, updateSectionColor, updateSectionIcon } = useMenuStore()
   const { pageLayout, assignSectionToPage, removeSectionFromPages } = useLayoutStore()
-  const { selectedSectionId, selectSection, markDirty } = useUIStore()
+  const { selectedSectionId, selectSection, markDirty, layoutViews, activeLayoutViewId, toggleViewSectionVisibility } = useUIStore()
 
   const pages = pageLayout.pages
   const isMultiPage = !!pages && pages.length > 1
+  const hasViews = layoutViews.length > 0
+  const activeView = layoutViews.find(v => v.id === activeLayoutViewId)
+  const isHiddenInView = hasViews && (activeView?.hiddenSectionIds ?? []).includes(section.id)
 
   const isSelected = selectedSectionId === section.id
 
@@ -188,9 +191,10 @@ export const SectionEditor: React.FC<SectionEditorProps> = ({ section }) => {
     <div
       ref={setNodeRef}
       style={style}
+      data-section-id={section.id}
       className={`bg-white border border-neutral-200 rounded-lg m-3 overflow-hidden ${
         isSelected ? 'border-l-4 border-l-amber-600' : ''
-      }`}
+      } ${isHiddenInView ? 'opacity-50' : ''}`}
     >
       {/* Section Header */}
       <div
@@ -253,6 +257,27 @@ export const SectionEditor: React.FC<SectionEditorProps> = ({ section }) => {
           ✕
         </button>
       </div>
+
+      {/* View visibility checkboxes */}
+      {hasViews && (
+        <div className="flex items-center gap-3 px-4 py-1.5 bg-neutral-50 border-t border-neutral-100" onClick={(e) => e.stopPropagation()}>
+          <span className="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Show in:</span>
+          {layoutViews.map((view) => {
+            const isVisible = !(view.hiddenSectionIds ?? []).includes(section.id)
+            return (
+              <label key={view.id} className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isVisible}
+                  onChange={() => { toggleViewSectionVisibility(section.id, view.id); markDirty() }}
+                  className="w-3 h-3 text-amber-600 border-neutral-300 rounded focus:ring-1 focus:ring-amber-500"
+                />
+                <span className={`text-[11px] ${isVisible ? 'text-neutral-700 font-medium' : 'text-neutral-400'}`}>{view.name}</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
 
       {/* Section Content */}
       {isExpanded && (

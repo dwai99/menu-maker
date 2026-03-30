@@ -10,7 +10,7 @@ import {
   createMenuSection,
   createMenuItem,
 } from '../models/menu'
-import type { DietaryIcon, ItemBadge, SectionColorOverride, HeaderElementPosition } from '../models/menu'
+import type { DietaryIcon, ItemBadge, SectionColorOverride, HeaderElementPosition, PageImage, TextFrame, TextFrameStyle } from '../models/menu'
 
 interface MenuStore {
   menuData: MenuData
@@ -22,6 +22,7 @@ interface MenuStore {
   setLogo: (logo: LogoData | undefined) => void
   setTitlePosition: (pos: HeaderElementPosition | undefined) => void
   setSubtitlePosition: (pos: HeaderElementPosition | undefined) => void
+  setDividerPosition: (pos: HeaderElementPosition | undefined) => void
 
   // Section CRUD
   addSection: () => void
@@ -42,6 +43,18 @@ interface MenuStore {
   toggleItemBadge: (sectionId: string, itemId: string, badge: ItemBadge) => void
   toggleItemHighlight: (sectionId: string, itemId: string) => void
   updateSectionIcon: (sectionId: string, icon: string) => void
+
+  // Page images
+  addPageImage: (image: PageImage) => void
+  updatePageImage: (imageId: string, updates: Partial<PageImage>) => void
+  removePageImage: (imageId: string) => void
+  reorderPageImages: (fromIndex: number, toIndex: number) => void
+
+  // Text frames
+  addTextFrame: (frame: TextFrame) => void
+  updateTextFrame: (frameId: string, updates: Partial<TextFrame>) => void
+  updateTextFrameStyle: (frameId: string, styleUpdates: Partial<TextFrameStyle>) => void
+  removeTextFrame: (frameId: string) => void
 
   // Bulk
   appendSections: (sections: MenuSection[]) => void
@@ -86,6 +99,12 @@ export const useMenuStore = create<MenuStore>()(temporal((set, get) => ({
   setSubtitlePosition: (pos: HeaderElementPosition | undefined) => {
     set((state) => ({
       menuData: { ...state.menuData, subtitlePosition: pos },
+    }))
+  },
+
+  setDividerPosition: (pos: HeaderElementPosition | undefined) => {
+    set((state) => ({
+      menuData: { ...state.menuData, dividerPosition: pos },
     }))
   },
 
@@ -363,6 +382,86 @@ export const useMenuStore = create<MenuStore>()(temporal((set, get) => ({
         sections: state.menuData.sections.map((section) =>
           section.id === sectionId ? { ...section, icon } : section
         ),
+      },
+    }))
+  },
+
+  // Page images
+  addPageImage: (image: PageImage) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        pageImages: [...(state.menuData.pageImages || []), image],
+      },
+    }))
+  },
+
+  updatePageImage: (imageId: string, updates: Partial<PageImage>) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        pageImages: (state.menuData.pageImages || []).map((img) =>
+          img.id === imageId ? { ...img, ...updates } : img
+        ),
+      },
+    }))
+  },
+
+  removePageImage: (imageId: string) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        pageImages: (state.menuData.pageImages || []).filter((img) => img.id !== imageId),
+      },
+    }))
+  },
+
+  reorderPageImages: (fromIndex: number, toIndex: number) => {
+    set((state) => {
+      const images = [...(state.menuData.pageImages || [])]
+      const [removed] = images.splice(fromIndex, 1)
+      images.splice(toIndex, 0, removed)
+      return { menuData: { ...state.menuData, pageImages: images } }
+    })
+  },
+
+  // Text frames
+  addTextFrame: (frame: TextFrame) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        textFrames: [...(state.menuData.textFrames || []), frame],
+      },
+    }))
+  },
+
+  updateTextFrame: (frameId: string, updates: Partial<TextFrame>) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        textFrames: (state.menuData.textFrames || []).map((f) =>
+          f.id === frameId ? { ...f, ...updates } : f
+        ),
+      },
+    }))
+  },
+
+  updateTextFrameStyle: (frameId: string, styleUpdates: Partial<TextFrameStyle>) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        textFrames: (state.menuData.textFrames || []).map((f) =>
+          f.id === frameId ? { ...f, style: { ...f.style, ...styleUpdates } } : f
+        ),
+      },
+    }))
+  },
+
+  removeTextFrame: (frameId: string) => {
+    set((state) => ({
+      menuData: {
+        ...state.menuData,
+        textFrames: (state.menuData.textFrames || []).filter((f) => f.id !== frameId),
       },
     }))
   },

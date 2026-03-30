@@ -24,6 +24,7 @@ export type PageBorder = 'none' | 'thin' | 'double' | 'thick' | 'inset'
 export type TextTransform = 'none' | 'uppercase' | 'lowercase' | 'capitalize'
 export type ColumnCount = 1 | 2 | 3 | 4 | 5 | 6
 export type VariantDisplayMode = 'inline' | 'stacked'
+export type PricePosition = 'inline' | 'below'
 export type Vertex = [number, number]  // [x%, y%] relative to content area
 
 export interface PageDimensions {
@@ -53,7 +54,7 @@ export interface FontStyle {
   fontFamily: string
   fontSize: number        // in pt
   fontWeight: number
-  letterSpacing: number   // in em
+  letterSpacing: number   // in px
   lineHeight: number
   textTransform: TextTransform
   textAlign: 'left' | 'center' | 'right'
@@ -109,6 +110,7 @@ export interface PageLayout {
   pageBorder: PageBorder
   sectionGap: number
   headerHeight?: number  // px — space reserved for header elements before sections
+  pricePosition?: PricePosition
   variantDisplayMode?: VariantDisplayMode
   variantSeparator?: VariantSeparator
   sectionTitleDecoration?: SectionTitleDecoration
@@ -150,6 +152,7 @@ export function createDefaultTypography(): TypographyConfig {
       fontFamily: 'Georgia',
       fontSize: 18,
       fontWeight: 700,
+      color: '',
     }),
     sectionSubtitle: createDefaultFontStyle({
       fontSize: 12,
@@ -167,6 +170,7 @@ export function createDefaultTypography(): TypographyConfig {
       fontSize: 12,
       fontWeight: 700,
       textAlign: 'right',
+      color: '',
     }),
     footer: createDefaultFontStyle({
       fontSize: 9,
@@ -177,10 +181,10 @@ export function createDefaultTypography(): TypographyConfig {
 
 export function createDefaultColorScheme(): ColorScheme {
   return {
-    background: '#FFFDF5',
-    text: '#2C1810',
-    accent: '#8B4513',
-    border: '#D4C5A9',
+    background: '#FFFFFF',
+    text: '#000000',
+    accent: '#000000',
+    border: '#000000',
   }
 }
 
@@ -204,10 +208,10 @@ export const TRI_FOLD_PANEL_LABELS: Record<TriFoldPanelRole, string> = {
 }
 
 /**
- * Front side (page 0) panels left→right: back | inner-flap | cover
+ * Front side (page 0) panels left→right: inner-flap | back | cover
  * Back side  (page 1) panels left→right: inside-left | inside-center | inside-right
  */
-export const TRI_FOLD_FRONT_PANELS: TriFoldPanelRole[] = ['back', 'inner-flap', 'cover']
+export const TRI_FOLD_FRONT_PANELS: TriFoldPanelRole[] = ['inner-flap', 'back', 'cover']
 export const TRI_FOLD_BACK_PANELS: TriFoldPanelRole[] = ['inside-left', 'inside-center', 'inside-right']
 
 export type TriFoldPaperSize = 'letter' | 'legal'
@@ -240,10 +244,10 @@ export function createDefaultPageLayout(): PageLayout {
     pageSize: 'letter',
     orientation: 'portrait',
     margins: {
-      top: 0.75,
-      right: 0.75,
-      bottom: 0.75,
-      left: 0.75,
+      top: 0.25,
+      right: 0.25,
+      bottom: 0.25,
+      left: 0.25,
     },
     columnCount: 1,
     layoutDirection: 'vertical',

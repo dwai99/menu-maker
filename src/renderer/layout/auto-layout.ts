@@ -8,9 +8,10 @@ import {
   estimateSectionHeight,
   estimatePartialSectionHeight,
   findSplitPoint,
+  HEIGHT_BUFFER,
 } from './measure'
-import { computeTreemapLayout, type TreemapResult } from './treemap'
-import { sortSections } from './section-order'
+import { computeTreemapLayout, balancedPartition, findSplitPointWithOrphanGuard, type TreemapResult } from './treemap'
+// Sections are placed in editor order (the order they arrive in the sections array)
 
 export interface AutoLayoutResult {
   sectionLayouts: SectionLayout[]
@@ -61,7 +62,6 @@ export function computeAutoLayout(input: {
 }
 
 const DPI = 96
-const HEIGHT_BUFFER = 1.15
 
 /**
  * Horizontal layout — sections arranged in rows left-to-right.
@@ -98,15 +98,12 @@ function computeHorizontalLayout(input: {
   const hGapPct = contentWidthPx > 0 ? (hGapPx / contentWidthPx) * 100 : 0
   const vGapPx = 8
 
-  // Sort sections semantically
-  const sorted = sortSections(sections)
-
-  // Measure heights
-  const measured = sorted.map((section) => {
-    const result = estimateSectionHeight(section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator as any, pageLayout.variantDisplayMode)
+  // Measure heights (editor order preserved)
+  const measured = sections.map((section) => {
+    const result = estimateSectionHeight(section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator as any, pageLayout.variantDisplayMode, pageLayout.sectionTitleDecoration)
     return {
       section,
-      heightPx: (result.estimatedHeight + 16) * HEIGHT_BUFFER,
+      heightPx: (result.estimatedHeight + 4) * HEIGHT_BUFFER,
     }
   })
 
@@ -157,6 +154,7 @@ function computeHorizontalLayout(input: {
 
 /**
  * Multi-page flow layout using the same column grid.
+ * Uses balanced partition per-page to distribute sections across columns evenly.
  * Supports section splitting: if a section is too tall for the remaining
  * column space, it splits — items that fit go here, the rest continue
  * in the next column or page.
@@ -188,142 +186,283 @@ export function computeFlowLayout(input: {
 
   const flowLayouts: SectionLayout[] = []
   let currentPage = 0
-  let watermarks = new Array(gridCols).fill(0) // in percent (0-100)
 
-  /** Find column with least content on current page */
-  const findBestCol = () => {
-    let best = 0
-    for (let c = 1; c < gridCols; c++) {
-      if (watermarks[c] < watermarks[best]) best = c
-    }
-    return best
-  }
-
-  /** Advance to next page, resetting watermarks */
-  const nextPage = () => {
-    currentPage++
-    watermarks = new Array(gridCols).fill(0)
-  }
-
-  // Process each section, potentially splitting across columns/pages
-  interface Frag {
+  // ── Step 1: Measure all sections ──
+  interface MeasuredSection {
     section: MenuSection
-    startIdx: number
+    heightPx: number
+    heightPct: number
+    startIdx?: number  // preserved from overflow continuation fragments
     endIdx?: number
   }
-  const queue: Frag[] = sections.map((s) => ({ section: s, startIdx: 0 }))
+  const allMeasured: MeasuredSection[] = sections.map((section) => {
+    const result = estimateSectionHeight(section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator, pageLayout.variantDisplayMode, pageLayout.sectionTitleDecoration)
+    const heightPx = (result.estimatedHeight + 4) * HEIGHT_BUFFER
+    return {
+      section,
+      heightPx,
+      heightPct: sectionsHeightPx > 0 ? (heightPx / sectionsHeightPx) * 100 : 0,
+    }
+  })
 
-  while (queue.length > 0) {
-    const frag = queue.shift()!
-    const itemCount = frag.section.items?.length || 0
-    const fragEnd = frag.endIdx ?? itemCount
+  // ── Step 2: Group sections into pages ──
+  // Scan sequentially: accumulate heights until total exceeds page capacity
+  const pageCapacityPx = sectionsHeightPx * gridCols
+  const pageGroups: MeasuredSection[][] = []
+  let currentGroup: MeasuredSection[] = []
+  let groupTotalPx = 0
 
-    // Measure this fragment's height
-    const heightResult = frag.startIdx === 0
-      ? estimateSectionHeight(frag.section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator, pageLayout.variantDisplayMode)
-      : { estimatedHeight: estimatePartialSectionHeight(frag.section, pageLayout.typography, colWidthPx, pageLayout.itemSeparator, frag.startIdx, frag.endIdx, pageLayout.variantDisplayMode) }
+  for (const ms of allMeasured) {
+    if (currentGroup.length > 0 && groupTotalPx + ms.heightPx > pageCapacityPx) {
+      pageGroups.push(currentGroup)
+      currentGroup = []
+      groupTotalPx = 0
+    }
+    currentGroup.push(ms)
+    groupTotalPx += ms.heightPx
+  }
+  if (currentGroup.length > 0) {
+    pageGroups.push(currentGroup)
+  }
 
-    const heightPx = (heightResult.estimatedHeight + 16) * HEIGHT_BUFFER
-    const heightPct = sectionsHeightPx > 0 ? (heightPx / sectionsHeightPx) * 100 : 0
+  // ── Step 3: Within each page, use balanced partition ──
+  for (const pageGroup of pageGroups) {
+    const heights = pageGroup.map((ms) => ms.heightPx)
+    const groups = balancedPartition(heights, gridCols, vGapPx)
 
-    let bestCol = findBestCol()
-    const remainingPct = 100 - watermarks[bestCol]
-
-    // Case 1: Fits in best column
-    if (heightPct <= remainingPct) {
-      flowLayouts.push({
-        sectionId: frag.section.id,
-        polygon: rectToPolygon(bestCol * (colWidthPct + hGapPct), watermarks[bestCol], colWidthPct, heightPct),
-        columnCount: 1,
-        pageIndex: currentPage,
-        startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
-        endItemIndex: frag.endIdx,
-      })
-      watermarks[bestCol] += heightPct + vGapPct
-      continue
+    // Build per-column queues from partition
+    interface Frag {
+      section: MenuSection
+      startIdx: number
+      endIdx?: number
+      heightPx: number
+      heightPct: number
     }
 
-    // Case 2: Doesn't fit — try splitting if there's some space and multiple items
-    const remainingPx = (remainingPct / 100) * sectionsHeightPx
-    if (remainingPx > 60 && (fragEnd - frag.startIdx) > 1) {
-      const splitResult = findSplitPoint(
-        frag.section,
-        pageLayout.typography,
-        colWidthPx,
-        remainingPx / HEIGHT_BUFFER,
-        pageLayout.itemSeparator,
-        frag.startIdx,
-        pageLayout.variantDisplayMode,
-      )
+    const colQueues: Frag[][] = groups.map((g) =>
+      pageGroup.slice(g.start, g.end).map((ms) => ({
+        section: ms.section,
+        startIdx: ms.startIdx ?? 0,
+        endIdx: ms.endIdx,
+        heightPx: ms.heightPx,
+        heightPct: ms.heightPct,
+      }))
+    )
 
-      if (splitResult.splitIndex > frag.startIdx && splitResult.splitIndex < fragEnd) {
-        // Place first part in current column
-        const usedPct = sectionsHeightPx > 0 ? (splitResult.usedHeight * HEIGHT_BUFFER / sectionsHeightPx) * 100 : 0
-        flowLayouts.push({
-          sectionId: frag.section.id,
-          polygon: rectToPolygon(bestCol * (colWidthPct + hGapPct), watermarks[bestCol], colWidthPct, usedPct),
-          columnCount: 1,
-          pageIndex: currentPage,
-          startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
-          endItemIndex: splitResult.splitIndex,
-        })
-        watermarks[bestCol] += usedPct + vGapPct
+    // Track per-column watermarks in percentage (0-100)
+    const watermarks = new Array(gridCols).fill(0)
 
-        // Queue the remainder (will land in next column or page)
-        queue.unshift({ section: frag.section, startIdx: splitResult.splitIndex, endIdx: frag.endIdx })
-        continue
-      }
+    // Track assignments for whitespace distribution
+    interface FlowAssignment {
+      sectionId: string
+      col: number
+      yPct: number
+      heightPct: number
+      pageIndex: number
+      startItemIndex?: number
+      endItemIndex?: number
     }
+    const pageAssignments: FlowAssignment[] = []
 
-    // Case 3: Column is empty but section is just too tall — place what fits then split
-    if (watermarks[bestCol] < vGapPct) {
-      // Empty column but section still overflows — force place + split
-      if ((fragEnd - frag.startIdx) > 1) {
-        const splitResult = findSplitPoint(
-          frag.section,
-          pageLayout.typography,
-          colWidthPx,
-          sectionsHeightPx / HEIGHT_BUFFER,
-          pageLayout.itemSeparator,
-          frag.startIdx,
-          pageLayout.variantDisplayMode,
-        )
-        if (splitResult.splitIndex > frag.startIdx) {
-          const usedPct = sectionsHeightPx > 0 ? (splitResult.usedHeight * HEIGHT_BUFFER / sectionsHeightPx) * 100 : 0
-          flowLayouts.push({
+    for (let col = 0; col < gridCols; col++) {
+      const queue = colQueues[col]
+
+      while (queue.length > 0) {
+        const frag = queue.shift()!
+        const itemCount = frag.section.items?.length || 0
+        const fragEnd = frag.endIdx ?? itemCount
+
+        // Re-measure if this is a continuation fragment
+        let heightPct = frag.heightPct
+        let heightPx = frag.heightPx
+        if (frag.startIdx > 0) {
+          const partialH = estimatePartialSectionHeight(frag.section, pageLayout.typography, colWidthPx, pageLayout.itemSeparator, frag.startIdx, frag.endIdx, pageLayout.variantDisplayMode)
+          heightPx = (partialH + 4) * HEIGHT_BUFFER
+          heightPct = sectionsHeightPx > 0 ? (heightPx / sectionsHeightPx) * 100 : 0
+        }
+
+        const remainingPct = 100 - watermarks[col]
+        const colIsEmpty = watermarks[col] < vGapPct * 2
+
+        // Case 1: Fits in remaining space
+        if (heightPct <= remainingPct) {
+          pageAssignments.push({
             sectionId: frag.section.id,
-            polygon: rectToPolygon(bestCol * (colWidthPct + hGapPct), 0, colWidthPct, Math.min(usedPct, 100)),
-            columnCount: 1,
+            col,
+            yPct: watermarks[col],
+            heightPct,
             pageIndex: currentPage,
             startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
-            endItemIndex: splitResult.splitIndex,
+            endItemIndex: frag.endIdx,
           })
-          watermarks[bestCol] = Math.min(usedPct, 100) + vGapPct
-          queue.unshift({ section: frag.section, startIdx: splitResult.splitIndex, endIdx: frag.endIdx })
+          watermarks[col] += heightPct + vGapPct
           continue
         }
+
+        // Case 2: Section fits whole in a column (within tolerance) — keep together
+        if (heightPct <= 115 && heightPct <= 100) {
+          if (colIsEmpty) {
+            pageAssignments.push({
+              sectionId: frag.section.id,
+              col,
+              yPct: 0,
+              heightPct,
+              pageIndex: currentPage,
+              startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
+              endItemIndex: frag.endIdx,
+            })
+            watermarks[col] = heightPct + vGapPct
+            continue
+          }
+          // Push to next column
+          if (col + 1 < gridCols) {
+            colQueues[col + 1].unshift(frag)
+          } else {
+            // Overflow to next page — re-queue
+            colQueues[col].unshift(frag)
+            break
+          }
+          continue
+        }
+
+        // Case 3: Must split
+        const remainingPx = (remainingPct / 100) * sectionsHeightPx
+
+        // If column is partially used with little space, push to next column
+        if (!colIsEmpty && remainingPx < sectionsHeightPx * 0.3) {
+          if (col + 1 < gridCols) {
+            colQueues[col + 1].unshift(frag)
+          } else {
+            colQueues[col].unshift(frag)
+            break
+          }
+          continue
+        }
+
+        const splitBudgetPx = colIsEmpty ? sectionsHeightPx : remainingPx
+        if ((fragEnd - frag.startIdx) > 1) {
+          const splitResult = findSplitPointWithOrphanGuard(
+            frag.section,
+            pageLayout.typography,
+            colWidthPx,
+            splitBudgetPx / HEIGHT_BUFFER,
+            pageLayout.itemSeparator,
+            frag.startIdx,
+            frag.endIdx,
+            pageLayout.variantDisplayMode,
+          )
+
+          if (splitResult.splitIndex > frag.startIdx && splitResult.splitIndex < fragEnd) {
+            const usedPct = sectionsHeightPx > 0 ? (splitResult.usedHeight * HEIGHT_BUFFER / sectionsHeightPx) * 100 : 0
+            pageAssignments.push({
+              sectionId: frag.section.id,
+              col,
+              yPct: watermarks[col],
+              heightPct: Math.min(usedPct, 100 - watermarks[col]),
+              pageIndex: currentPage,
+              startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
+              endItemIndex: splitResult.splitIndex,
+            })
+            watermarks[col] += usedPct + vGapPct
+
+            // Push remainder to next column
+            const remainderFrag: Frag = {
+              section: frag.section,
+              startIdx: splitResult.splitIndex,
+              endIdx: frag.endIdx,
+              heightPx: 0,
+              heightPct: 0,
+            }
+            if (col + 1 < gridCols) {
+              colQueues[col + 1].unshift(remainderFrag)
+            } else {
+              queue.unshift(remainderFrag)
+            }
+            continue
+          }
+        }
+
+        // Case 4: Can't split — place as-is or push
+        if (colIsEmpty) {
+          pageAssignments.push({
+            sectionId: frag.section.id,
+            col,
+            yPct: 0,
+            heightPct: Math.min(heightPct, 100),
+            pageIndex: currentPage,
+            startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
+            endItemIndex: frag.endIdx,
+          })
+          watermarks[col] = Math.min(heightPct, 100) + vGapPct
+          continue
+        }
+
+        if (col + 1 < gridCols) {
+          colQueues[col + 1].unshift(frag)
+        } else {
+          colQueues[col].unshift(frag)
+          break
+        }
       }
-      // Single item that's too tall or can't split — just place it
-      flowLayouts.push({
-        sectionId: frag.section.id,
-        polygon: rectToPolygon(bestCol * (colWidthPct + hGapPct), 0, colWidthPct, Math.min(heightPct, 100)),
-        columnCount: 1,
-        pageIndex: currentPage,
-        startItemIndex: frag.startIdx > 0 ? frag.startIdx : undefined,
-        endItemIndex: frag.endIdx,
-      })
-      watermarks[bestCol] = Math.min(heightPct, 100) + vGapPct
-      continue
     }
 
-    // Case 4: No room in any column on this page — advance to next page
-    nextPage()
-    queue.unshift(frag) // re-process on fresh page
+    // ── Stack sections from top of each column at natural height ──
+    for (let col = 0; col < gridCols; col++) {
+      const colAssignments = pageAssignments.filter((a) => a.col === col && a.pageIndex === currentPage)
+      if (colAssignments.length === 0) continue
+
+      let y = 0
+      for (let i = 0; i < colAssignments.length; i++) {
+        colAssignments[i].yPct = y
+        y += colAssignments[i].heightPct + (i < colAssignments.length - 1 ? vGapPct : 0)
+      }
+    }
+
+    // Convert assignments to SectionLayouts
+    for (const a of pageAssignments) {
+      flowLayouts.push({
+        sectionId: a.sectionId,
+        polygon: rectToPolygon(a.col * (colWidthPct + hGapPct), a.yPct, colWidthPct, a.heightPct),
+        columnCount: 1,
+        pageIndex: a.pageIndex,
+        startItemIndex: a.startItemIndex,
+        endItemIndex: a.endItemIndex,
+      })
+    }
+
+    // Check for overflow sections that didn't fit on this page
+    const overflowFrags: Frag[] = []
+    for (const queue of colQueues) {
+      overflowFrags.push(...queue)
+    }
+
+    if (overflowFrags.length > 0) {
+      // Re-queue overflow sections for the next page
+      currentPage++
+      // Create a new page group from the overflow — preserve startIdx/endIdx
+      // so continuation fragments render the correct item range on the next page.
+      const overflowMeasured: MeasuredSection[] = overflowFrags.map((f) => {
+        const hPx = f.startIdx > 0
+          ? (estimatePartialSectionHeight(f.section, pageLayout.typography, colWidthPx, pageLayout.itemSeparator, f.startIdx, f.endIdx, pageLayout.variantDisplayMode) + 4) * HEIGHT_BUFFER
+          : f.heightPx
+        return {
+          section: f.section,
+          heightPx: hPx,
+          heightPct: sectionsHeightPx > 0 ? (hPx / sectionsHeightPx) * 100 : 0,
+          startIdx: f.startIdx > 0 ? f.startIdx : undefined,
+          endIdx: f.endIdx,
+        }
+      })
+      // Push overflow as a new page group to process
+      pageGroups.push(overflowMeasured)
+    } else {
+      currentPage++
+    }
   }
 
   return {
     sectionLayouts: flowLayouts,
-    pageCount: currentPage + 1,
+    pageCount: Math.max(1, currentPage),
     columnCount: pageLayout.columnCount || 1,
     fontScale: 1.0,
   }

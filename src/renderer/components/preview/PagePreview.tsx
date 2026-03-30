@@ -4,15 +4,19 @@ import { useLayoutStore } from '@/stores/layout-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useDebouncedValue } from '@/hooks/useDebouncedStore'
 import { PAGE_SIZES } from '@/models/layout'
-import type { SectionLayout, ColumnCount, SectionDecoration, ColorScheme, BackgroundTexture, PageBorder, SectionDivider, Currency, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, HeaderConfig, HeaderLayoutPreset } from '@/models/layout'
+import type { SectionLayout, ColumnCount, SectionDecoration, ColorScheme, BackgroundTexture, PageBorder, SectionDivider, Currency, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, HeaderConfig, HeaderLayoutPreset, PricePosition } from '@/models/layout'
 import { createDefaultHeaderConfig } from '@/models/layout'
 import { DIETARY_ICON_META, ITEM_BADGE_META } from '@/models/menu'
 import type { DietaryIcon, ItemBadge, PriceVariant, HeaderElementPosition } from '@/models/menu'
-import { boundingBox, rectToPolygon } from '@/layout/polygon'
+import { boundingBox } from '@/layout/polygon'
 import { PolygonEditor } from './PolygonEditor'
-import { computeFlowLayout } from '@/layout/auto-layout'
-import { estimateHeaderHeight, estimateFooterHeight, findSplitPoint, estimatePartialSectionHeight } from '@/layout/measure'
+import { DraggableImage } from './DraggableImage'
+import { DraggableTextFrame } from './DraggableTextFrame'
+import { computeAutoLayout } from '@/layout/auto-layout'
+import { estimateHeaderHeight, estimateFooterHeight } from '@/layout/measure'
+import { getFragmentId, findFragment, resizeFragment } from '@/layout/layout-engine'
 import { getTriFoldFoldLinesByType, getTriFoldLineStyle } from '@/layout/tri-fold'
+import { useLayoutCommit } from '@/hooks/useLayoutCommit'
 import { TRI_FOLD_FRONT_PANELS, TRI_FOLD_BACK_PANELS, TRI_FOLD_PANEL_LABELS } from '@/models/layout'
 import type { TriFoldPanelRole } from '@/models/layout'
 
@@ -229,10 +233,13 @@ export const PagePreview: React.FC = () => {
   const setLogo = useMenuStore((state) => state.setLogo)
   const setTitlePosition = useMenuStore((state) => state.setTitlePosition)
   const setSubtitlePosition = useMenuStore((state) => state.setSubtitlePosition)
+  const setDividerPosition = useMenuStore((state) => state.setDividerPosition)
+  const updatePageImage = useMenuStore((state) => state.updatePageImage)
+  const updateTextFrame = useMenuStore((state) => state.updateTextFrame)
   // pageLayout is NOT debounced — it contains section layouts, column counts,
   // and positions that need instant feedback during drag/resize/auto-layout.
   const pageLayout = useLayoutStore((state) => state.pageLayout)
-  const setSectionLayout = useLayoutStore((state) => state.setSectionLayout)
+  const setFragmentLayout = useLayoutStore((state) => state.setFragmentLayout)
   const setSectionLayouts = useLayoutStore((state) => state.setSectionLayouts)
 
   // Only debounce menu content (text, items, descriptions) to prevent
@@ -247,13 +254,28 @@ export const PagePreview: React.FC = () => {
     selectedSectionId,
     selectedSectionIds,
     selectedItemId,
+    selectedFragmentId,
     selectSection,
+    selectFragment,
+    selectItem,
     toggleSectionSelection,
+    selectedPageImageId,
+    selectPageImage,
+    selectedTextFrameId,
+    selectTextFrame,
     markDirty,
     overflowState,
     previewLayout,
     setPreviewLayout,
+    setPendingLayoutCommit,
+    layoutViews,
+    activeLayoutViewId,
   } = useUIStore()
+
+  // Per-view visibility filtering
+  const activeView = layoutViews.find(v => v.id === activeLayoutViewId)
+  const hiddenSectionIds = activeView?.hiddenSectionIds ?? []
+  const hiddenItemIds = activeView?.hiddenItemIds ?? []
 
   const [isDragging, setIsDragging] = useState(false)
   const [logoSelected, setLogoSelected] = useState(false)
@@ -289,16 +311,70 @@ export const PagePreview: React.FC = () => {
     [pageLayout.sectionLayouts]
   )
 
-  // Calculate sections container height (content area minus header/footer)
-  const sectionsContainerHeight = useMemo(() => {
-    if (!hasAnyExplicitLayouts) return undefined // flow layout, auto height
-    const headerH = estimateHeaderHeight(menuData, pageLayout.typography)
-    const footerH = estimateFooterHeight(menuData.footer, pageLayout.typography)
-    return contentHeightPx - headerH - footerH
-  }, [hasAnyExplicitLayouts, menuData, pageLayout.typography, contentHeightPx])
+  // Estimate header/footer heights for per-page container sizing
+  const estimatedHeaderH = useMemo(
+    () => estimateHeaderHeight(menuData, pageLayout.typography),
+    [menuData, pageLayout.typography]
+  )
+  const estimatedFooterH = useMemo(
+    () => estimateFooterHeight(menuData.footer, pageLayout.typography),
+    [menuData.footer, pageLayout.typography]
+  )
+
+  // Per-page sections container height: subtract header (first page) and footer (last page)
+  // In tri-fold mode, header/footer are suppressed so full content height is available.
+  const isTriFold = !!pageLayout.triFold?.enabled
+  const getContainerHeight = useCallback(
+    (isFirstPage: boolean, isLastPage: boolean): number | undefined => {
+      if (!hasAnyExplicitLayouts) return undefined
+      let h = contentHeightPx
+      if (!isTriFold) {
+        if (isFirstPage) h -= estimatedHeaderH
+        if (isLastPage) h -= estimatedFooterH
+      }
+      return h
+    },
+    [hasAnyExplicitLayouts, contentHeightPx, estimatedHeaderH, estimatedFooterH, isTriFold]
+  )
+
+  // Default (first+last page) for backward-compatible single-page use
+  const sectionsContainerHeight = useMemo(
+    () => getContainerHeight(true, true),
+    [getContainerHeight]
+  )
+
+  // Total layout pages (derived from sectionLayouts) — used for per-page height in renderSectionFragment
+  const totalLayoutPages = useMemo(
+    () => Math.max(1, ...((pageLayout.sectionLayouts || []).map(sl => (sl.pageIndex ?? 0) + 1))),
+    [pageLayout.sectionLayouts]
+  )
+
+  // Which page the selected fragment is on (for z-index elevation)
+  const selectedFragmentPageIdx = useMemo(() => {
+    if (!selectedFragmentId) return -1
+    const frag = findFragment(selectedFragmentId, pageLayout.sectionLayouts || [])
+    return frag?.pageIndex ?? -1
+  }, [selectedFragmentId, pageLayout.sectionLayouts])
 
   // Ref for sections container
   const sectionsRef = useRef<HTMLDivElement>(null)
+
+  // Refs for individual section fragments (for layout correction)
+  const sectionRefsMap = useRef<Map<string, HTMLDivElement | null>>(new Map())
+  const getSectionRefCallback = useCallback(
+    (fragmentId: string) => (el: HTMLDivElement | null) => {
+      sectionRefsMap.current.set(fragmentId, el)
+    },
+    []
+  )
+
+  // Layout commit: one-shot measurement after auto-layout writes corrections to the store
+  useLayoutCommit({
+    sectionRefs: sectionRefsMap.current,
+    sectionLayouts: pageLayout.sectionLayouts || [],
+    contentHeightPx: sectionsContainerHeight ?? contentHeightPx,
+    zoom,
+  })
 
   // Compute column grid lines for snap-to-grid editing
   const columnGridLines = useMemo(() => {
@@ -338,28 +414,83 @@ export const PagePreview: React.FC = () => {
     [pageLayout.sectionLayouts]
   )
 
+  // Handle section resize completion — auto-split overflowing items into
+  // a continuation fragment, or absorb items back when section is expanded.
+  // IMPORTANT: Reads sectionLayouts from the store at call time (not from
+  // the closure) because the polygon changes during drag and the closure
+  // would hold stale pre-drag values, undoing the resize.
+  // NOTE: Also called after drag completion to trigger layout correction.
+  const handleResizeEnd = useCallback(
+    (fragmentId: string, sectionId: string) => {
+      const section = menuData.sections.find(s => s.id === sectionId)
+      if (!section || (section.items || []).length === 0) return
+
+      // Read LATEST layouts from the store — the closure value is stale
+      // because the polygon was updated on every mousemove during drag.
+      const currentLayouts = useLayoutStore.getState().pageLayout.sectionLayouts || []
+
+      // Compute per-page container height for this fragment
+      const frag = findFragment(fragmentId, currentLayouts)
+      const pageIdx = frag?.pageIndex ?? 0
+      const totalPages = Math.max(1, ...currentLayouts.map(sl => (sl.pageIndex ?? 0) + 1))
+      const effectiveHeight = getContainerHeight(pageIdx === 0, pageIdx === totalPages - 1) || contentHeightPx
+
+      const newLayouts = resizeFragment({
+        fragmentId,
+        section,
+        allLayouts: currentLayouts,
+        typography: pageLayout.typography,
+        itemSeparator: pageLayout.itemSeparator,
+        contentWidthPx,
+        effectiveHeightPx: effectiveHeight,
+        variantDisplayMode: pageLayout.variantDisplayMode,
+      })
+
+      setSectionLayouts(newLayouts)
+      markDirty()
+    },
+    [menuData.sections, pageLayout.typography, pageLayout.itemSeparator, pageLayout.variantDisplayMode, contentWidthPx, contentHeightPx, getContainerHeight, setSectionLayouts, markDirty]
+  )
+
   // Drag handler for moving sections (translates all polygon vertices)
   const handleDragStart = useCallback(
-    (e: React.MouseEvent, sectionId: string) => {
+    (e: React.MouseEvent, sectionId: string, fragmentId: string) => {
       e.preventDefault()
       e.stopPropagation()
 
-      selectSection(sectionId)
-      setIsDragging(true)
+      selectFragment(fragmentId)
 
       const startX = e.clientX
       const startY = e.clientY
-      const layout = getOrCreateSectionLayout(sectionId)
+      // Use fragmentId to find the exact fragment (not just the first with this sectionId)
+      const layout = findFragment(fragmentId, pageLayout.sectionLayouts || []) ?? getOrCreateSectionLayout(sectionId)
+
+      // Polygon data is the single source of truth — no correction snapping needed
       const startPolygon = layout.polygon.map(v => [...v] as [number, number])
 
+      setIsDragging(true)
+
+      // Compute bounding box dimensions of the (possibly corrected) polygon for clamping
+      const startBbox = boundingBox(startPolygon)
+
+      // Compute container height for this fragment's page
+      const pageIdx = layout.pageIndex ?? 0
+      const totalPages = Math.max(1, ...((pageLayout.sectionLayouts || []).map(sl => (sl.pageIndex ?? 0) + 1)))
+      const isFirst = pageIdx === 0
+      const isLast = pageIdx === totalPages - 1
+      const effectiveHeight = getContainerHeight(isFirst, isLast) || contentHeightPx
+
       const handleMouseMove = (moveE: MouseEvent) => {
-        const effectiveHeight = sectionsContainerHeight || contentHeightPx
         const dx = ((moveE.clientX - startX) / (contentWidthPx * zoom)) * 100
         const dy = ((moveE.clientY - startY) / (effectiveHeight * zoom)) * 100
 
-        const newPolygon = startPolygon.map(([vx, vy]) => [vx + dx, vy + dy] as [number, number])
+        // Clamp so the bounding box stays within 0-100% on both axes
+        const clampedDx = Math.max(-startBbox.x, Math.min(100 - (startBbox.x + startBbox.width), dx))
+        const clampedDy = Math.max(-startBbox.y, Math.min(100 - (startBbox.y + startBbox.height), dy))
 
-        setSectionLayout(sectionId, { polygon: newPolygon })
+        const newPolygon = startPolygon.map(([vx, vy]) => [vx + clampedDx, vy + clampedDy] as [number, number])
+
+        setFragmentLayout(fragmentId, { polygon: newPolygon })
         markDirty()
       }
 
@@ -372,20 +503,22 @@ export const PagePreview: React.FC = () => {
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [contentWidthPx, contentHeightPx, sectionsContainerHeight, zoom, setSectionLayout, markDirty, selectSection, getOrCreateSectionLayout]
+    [contentWidthPx, contentHeightPx, getContainerHeight, zoom, setFragmentLayout, markDirty, selectFragment, getOrCreateSectionLayout, pageLayout.sectionLayouts]
   )
 
   // Section click handler — Cmd/Ctrl+click toggles multi-select
   const handleSectionClick = useCallback(
-    (e: React.MouseEvent, sectionId: string) => {
+    (e: React.MouseEvent, sectionId: string, fragmentId?: string) => {
       e.stopPropagation()
       if (e.metaKey || e.ctrlKey) {
         toggleSectionSelection(sectionId)
+      } else if (fragmentId) {
+        selectFragment(fragmentId)
       } else {
         selectSection(sectionId)
       }
     },
-    [selectSection, toggleSectionSelection]
+    [selectSection, selectFragment, toggleSectionSelection]
   )
 
   // Logo drag handler
@@ -510,11 +643,95 @@ export const PagePreview: React.FC = () => {
     [menuData.subtitlePosition, contentWidthPx, contentHeightPx, zoom, setSubtitlePosition, markDirty]
   )
 
+  // Divider drag handler
+  const handleDividerDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+
+      const currentPos: HeaderElementPosition = menuData.dividerPosition ?? { x: 50, y: 10, width: 60 }
+
+      const startX = e.clientX
+      const startY = e.clientY
+      const startPosX = currentPos.x
+      const startPosY = currentPos.y
+
+      if (!menuData.dividerPosition) {
+        setDividerPosition(currentPos)
+        markDirty()
+      }
+
+      const handleMouseMove = (moveE: MouseEvent) => {
+        const dx = ((moveE.clientX - startX) / (contentWidthPx * zoom)) * 100
+        const dy = ((moveE.clientY - startY) / (contentHeightPx * zoom)) * 100
+
+        const newX = Math.max(0, Math.min(100, startPosX + dx))
+        const newY = Math.max(0, Math.min(100, startPosY + dy))
+
+        setDividerPosition({ ...currentPos, x: newX, y: newY })
+        markDirty()
+      }
+
+      const handleMouseUp = () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    },
+    [menuData.dividerPosition, contentWidthPx, contentHeightPx, zoom, setDividerPosition, markDirty]
+  )
+
   // Deselect when clicking page background
   const handlePageClick = useCallback(() => {
     selectSection(null)
     setLogoSelected(false)
-  }, [selectSection])
+    selectPageImage(null)
+    selectTextFrame(null)
+  }, [selectSection, selectPageImage, selectTextFrame])
+
+  // Page image update handler (wraps store update + dirty flag)
+  const handlePageImageUpdate = useCallback(
+    (imageId: string, updates: Partial<import('@/models/menu').PageImage>) => {
+      updatePageImage(imageId, updates)
+      markDirty()
+    },
+    [updatePageImage, markDirty]
+  )
+
+  const handlePageImageSelect = useCallback(
+    (imageId: string) => {
+      selectPageImage(imageId)
+      setLogoSelected(false)
+    },
+    [selectPageImage]
+  )
+
+  // Text frame handlers
+  const handleTextFrameUpdate = useCallback(
+    (frameId: string, updates: Partial<import('@/models/menu').TextFrame>) => {
+      updateTextFrame(frameId, updates)
+      markDirty()
+    },
+    [updateTextFrame, markDirty]
+  )
+
+  const handleTextFrameContentUpdate = useCallback(
+    (frameId: string, content: string) => {
+      updateTextFrame(frameId, { content })
+      markDirty()
+    },
+    [updateTextFrame, markDirty]
+  )
+
+  const handleTextFrameSelect = useCallback(
+    (frameId: string) => {
+      selectTextFrame(frameId)
+      setLogoSelected(false)
+    },
+    [selectTextFrame]
+  )
 
   // Overflow action: shrink all fonts by 10%
   const handleShrinkFonts = useCallback(() => {
@@ -535,129 +752,28 @@ export const PagePreview: React.FC = () => {
       store.setColumnCount((current + 1) as ColumnCount)
       // Recalculate layouts with the new column count to avoid stale split fragments
       const updatedLayout = useLayoutStore.getState().pageLayout
-      const result = computeFlowLayout({
+      const result = computeAutoLayout({
         sections: menuData.sections || [],
         pageLayout: updatedLayout,
         menuData,
       })
       setSectionLayouts(result.sectionLayouts)
+      setPendingLayoutCommit(true)
       markDirty()
     }
-  }, [pageLayout.columnCount, menuData, setSectionLayouts, markDirty])
+  }, [pageLayout.columnCount, menuData, setSectionLayouts, setPendingLayoutCommit, markDirty])
 
   // Overflow action: switch to multi-page flow layout
   const handleMultiPage = useCallback(() => {
-    const result = computeFlowLayout({
+    const result = computeAutoLayout({
       sections: menuData.sections || [],
       pageLayout,
       menuData,
     })
     setSectionLayouts(result.sectionLayouts)
+    setPendingLayoutCommit(true)
     markDirty()
-  }, [menuData, pageLayout, setSectionLayouts, markDirty])
-
-  // Handle section resize completion — auto-split overflowing items into
-  // a continuation fragment, or absorb items back when section is expanded.
-  // IMPORTANT: Reads sectionLayouts from the store at call time (not from
-  // the closure) because the polygon changes during drag and the closure
-  // would hold stale pre-drag values, undoing the resize.
-  const handleResizeEnd = useCallback(
-    (sectionId: string, fragmentStartIndex: number) => {
-      const section = menuData.sections.find(s => s.id === sectionId)
-      if (!section || (section.items || []).length === 0) return
-
-      // Read LATEST layouts from the store — the closure value is stale
-      // because the polygon was updated on every mousemove during drag.
-      const currentLayouts = useLayoutStore.getState().pageLayout.sectionLayouts || []
-      const allLayouts = [...currentLayouts]
-
-      // Find the specific layout fragment that was resized
-      const layoutIdx = allLayouts.findIndex(
-        sl => sl.sectionId === sectionId && (sl.startItemIndex ?? 0) === fragmentStartIndex
-      )
-      if (layoutIdx === -1) return
-      const layout = allLayouts[layoutIdx]
-
-      // Calculate available height in pixels from the polygon bounding box
-      const effectiveHeight = sectionsContainerHeight || contentHeightPx
-      const bboxRect = boundingBox(layout.polygon)
-      const availableHeightPx = (bboxRect.height / 100) * effectiveHeight
-
-      // Calculate container width for text measurement
-      const colWidthPx = (bboxRect.width / 100) * contentWidthPx
-
-      // Find where items split at the new height
-      const totalItems = (section.items || []).length
-      const splitResult = findSplitPoint(
-        section,
-        pageLayout.typography,
-        colWidthPx,
-        availableHeightPx,
-        pageLayout.itemSeparator,
-        fragmentStartIndex,
-        pageLayout.variantDisplayMode,
-      )
-
-      // Find existing continuation fragments (same sectionId, higher startItemIndex)
-      const continuationIndices: number[] = []
-      allLayouts.forEach((sl, idx) => {
-        if (sl.sectionId === sectionId && (sl.startItemIndex ?? 0) > fragmentStartIndex) {
-          continuationIndices.push(idx)
-        }
-      })
-      continuationIndices.sort((a, b) =>
-        (allLayouts[a].startItemIndex ?? 0) - (allLayouts[b].startItemIndex ?? 0)
-      )
-
-      if (splitResult.splitIndex >= totalItems) {
-        // All remaining items fit — remove continuations and clear endItemIndex
-        allLayouts[layoutIdx] = { ...allLayouts[layoutIdx], endItemIndex: undefined }
-        // Remove continuations in reverse order to preserve indices
-        for (let i = continuationIndices.length - 1; i >= 0; i--) {
-          allLayouts.splice(continuationIndices[i], 1)
-        }
-      } else {
-        // Need to split — update endItemIndex on the resized fragment
-        allLayouts[layoutIdx] = { ...allLayouts[layoutIdx], endItemIndex: splitResult.splitIndex }
-
-        if (continuationIndices.length > 0) {
-          // Update existing continuation's startItemIndex
-          const contIdx = continuationIndices[0]
-          allLayouts[contIdx] = { ...allLayouts[contIdx], startItemIndex: splitResult.splitIndex }
-        } else {
-          // Create new continuation fragment positioned below
-          const gap = 2 // 2% gap below
-          const remainingHeightPx = estimatePartialSectionHeight(
-            section,
-            pageLayout.typography,
-            colWidthPx,
-            pageLayout.itemSeparator,
-            splitResult.splitIndex,
-            undefined,
-            pageLayout.variantDisplayMode,
-          )
-          const remainingHeightPct = Math.min(
-            (remainingHeightPx * 1.15 / effectiveHeight) * 100,
-            100,
-          )
-          const contY = Math.min(bboxRect.y + bboxRect.height + gap, 95)
-          const contHeight = Math.min(remainingHeightPct, 100 - contY)
-
-          allLayouts.push({
-            sectionId,
-            polygon: rectToPolygon(bboxRect.x, contY, bboxRect.width, Math.max(contHeight, 5)),
-            columnCount: layout.columnCount,
-            pageIndex: layout.pageIndex,
-            startItemIndex: splitResult.splitIndex,
-          })
-        }
-      }
-
-      setSectionLayouts(allLayouts)
-      markDirty()
-    },
-    [menuData.sections, pageLayout.typography, pageLayout.itemSeparator, pageLayout.variantDisplayMode, contentWidthPx, contentHeightPx, sectionsContainerHeight, setSectionLayouts, markDirty]
-  )
+  }, [menuData, pageLayout, setSectionLayouts, setPendingLayoutCommit, markDirty])
 
   // Render item separator
   const renderSeparator = useCallback(() => {
@@ -699,12 +815,16 @@ export const PagePreview: React.FC = () => {
       const itemDescStyle = pageLayout.typography.itemDescription
       const itemPriceStyle = pageLayout.typography.itemPrice
       const priceFormat = pageLayout.priceFormat
+      const pricePosition: PricePosition = item.pricePosition ?? pageLayout.pricePosition ?? 'inline'
 
       const colorScheme = pageLayout.colorScheme
       const highlightBg = item.isHighlighted ? `${colorScheme.accent}10` : undefined
 
+      // Scale item spacing proportionally to font size
+      const itemGap = Math.max(4, Math.round(itemNameStyle.fontSize * 0.65))
+
       const itemContainerStyle: React.CSSProperties = {
-        marginBottom: '12px',
+        marginBottom: `${itemGap}px`,
         opacity: 1,
         backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.1)' : (highlightBg || 'transparent'),
         padding: isSelected || item.isHighlighted ? '4px' : '0',
@@ -712,35 +832,52 @@ export const PagePreview: React.FC = () => {
         breakInside: 'avoid',
       }
 
+      // --- Compute prices and variants early so styles can reference them ---
+      const hasVariants = item.variants && item.variants.length > 0
+      const variantMode: VariantDisplayMode = pageLayout.variantDisplayMode || 'inline'
+      const separatorChar = pageLayout.variantSeparator || '/'
+      const separatorStr = ` ${separatorChar} `
+      const variantPriceText = hasVariants && variantMode === 'inline'
+        ? formatVariantsInline(item.variants!, pageLayout.currency || '$', separatorStr)
+        : ''
+      const basePriceText = formatPrice(item.price, item.priceLabel, pageLayout.currency || '$')
+
+      // When inline variants exist, they replace the base price entirely
+      const priceText = variantPriceText || basePriceText
+      const showPriceOnNameRow = pricePosition !== 'below' && !(hasVariants && variantMode === 'stacked')
+      const hasContent = item.description || pricePosition === 'below'
+
       const nameRowStyle: React.CSSProperties = {
         display: 'flex',
-        justifyContent: priceFormat === 'right-aligned' ? 'space-between' : 'flex-start',
-        alignItems: priceFormat === 'dot-leaders' ? 'baseline' : 'center',
-        gap: priceFormat === 'inline' ? '8px' : '0',
-        marginBottom: item.description ? '4px' : '0',
+        justifyContent: pricePosition === 'below' ? 'flex-start' : (priceFormat === 'right-aligned' ? 'space-between' : 'flex-start'),
+        alignItems: pricePosition === 'below' ? 'center' : (priceFormat === 'dot-leaders' ? 'baseline' : 'center'),
+        gap: pricePosition === 'below' ? '0' : (priceFormat === 'inline' ? '8px' : '0'),
+        marginBottom: hasContent ? '2px' : '0',
       }
 
       const nameStyle: React.CSSProperties = {
         fontFamily: itemNameStyle.fontFamily,
         fontSize: `${itemNameStyle.fontSize}pt`,
         fontWeight: itemNameStyle.fontWeight,
-        letterSpacing: `${itemNameStyle.letterSpacing}em`,
+        letterSpacing: `${itemNameStyle.letterSpacing}px`,
         lineHeight: itemNameStyle.lineHeight,
         textTransform: itemNameStyle.textTransform as any,
         textAlign: itemNameStyle.textAlign as any,
         color: itemNameStyle.color || pageLayout.colorScheme.text,
-        flex: priceFormat === 'dot-leaders' ? '0 0 auto' : undefined,
+        flex: priceFormat === 'dot-leaders' ? '0 0 auto' : '1 1 auto',
+        minWidth: 0,
       }
 
       const priceStyle: React.CSSProperties = {
         fontFamily: itemPriceStyle.fontFamily,
         fontSize: `${itemPriceStyle.fontSize}pt`,
         fontWeight: itemPriceStyle.fontWeight,
-        letterSpacing: `${itemPriceStyle.letterSpacing}em`,
+        letterSpacing: `${itemPriceStyle.letterSpacing}px`,
         lineHeight: itemPriceStyle.lineHeight,
         textTransform: itemPriceStyle.textTransform as any,
         color: itemPriceStyle.color || pageLayout.colorScheme.accent,
         whiteSpace: 'nowrap',
+        flexShrink: 0,
       }
 
       const leaderStyle: React.CSSProperties = {
@@ -754,25 +891,31 @@ export const PagePreview: React.FC = () => {
         fontFamily: itemDescStyle.fontFamily,
         fontSize: `${itemDescStyle.fontSize}pt`,
         fontWeight: itemDescStyle.fontWeight,
-        letterSpacing: `${itemDescStyle.letterSpacing}em`,
+        letterSpacing: `${itemDescStyle.letterSpacing}px`,
         lineHeight: itemDescStyle.lineHeight,
         color: itemDescStyle.color || pageLayout.colorScheme.text,
-        marginTop: '4px',
+        marginTop: '2px',
       }
 
-      const hasVariants = item.variants && item.variants.length > 0
-      const variantMode: VariantDisplayMode = pageLayout.variantDisplayMode || 'inline'
-      const separatorChar = pageLayout.variantSeparator || '/'
-      const separatorStr = ` ${separatorChar} `
-      const variantPriceText = hasVariants && variantMode === 'inline'
-        ? formatVariantsInline(item.variants!, pageLayout.currency || '$', separatorStr)
-        : ''
-      // Fall back to base price if variants exist but none have prices
-      const priceText = variantPriceText || formatPrice(item.price, item.priceLabel, pageLayout.currency || '$')
-      const showPriceOnNameRow = !(hasVariants && variantMode === 'stacked')
+      // Custom render — user-authored free-form HTML replaces structured layout.
+      // The HTML contains its own inline styles (generated to match the
+      // structured render exactly). Content is user-authored in this desktop
+      // Electron app, not untrusted external data.
+      const handleItemClick = (e: React.MouseEvent) => {
+        e.stopPropagation()
+        selectItem(sectionId, item.id)
+      }
+
+      if (item.customRender) {
+        return (
+          <div key={item.id} style={itemContainerStyle} onClick={handleItemClick}>
+            <div dangerouslySetInnerHTML={{ __html: item.customRender }} />
+          </div>
+        )
+      }
 
       return (
-        <div key={item.id} style={itemContainerStyle}>
+        <div key={item.id} style={itemContainerStyle} onClick={handleItemClick}>
           <div style={nameRowStyle}>
             <span style={nameStyle}>{item.name}</span>
             {/* Dietary icons inline after name */}
@@ -825,15 +968,28 @@ export const PagePreview: React.FC = () => {
               </span>
             )}
             {showPriceOnNameRow && priceFormat === 'dot-leaders' && priceText && <div style={leaderStyle} />}
-            {showPriceOnNameRow && priceText && <span style={priceStyle}>{priceText}</span>}
+            {showPriceOnNameRow && priceText && (
+              <span style={priceStyle}>{priceText}</span>
+            )}
           </div>
+
+          {/* Price below name row */}
+          {pricePosition === 'below' && priceText && (
+            <div style={{
+              display: 'flex',
+              alignItems: priceFormat === 'right-aligned' ? 'flex-end' : 'flex-start',
+              marginTop: '1px',
+            }}>
+              <span style={priceStyle}>{priceText}</span>
+            </div>
+          )}
 
           {/* Stacked variant rows */}
           {hasVariants && variantMode === 'stacked' && (
-            <div style={{ marginTop: '2px' }}>
+            <div style={{ marginTop: '1px' }}>
               {item.variants!.filter((v: PriceVariant) => v.price).map((v: PriceVariant) => {
                 const sym = (pageLayout.currency || '$') === 'none' ? '' : (pageLayout.currency || '$')
-                const variantPriceText = `${sym}${v.price}`
+                const stackedVariantPrice = `${sym}${v.price}`
                 return (
                   <div
                     key={v.id}
@@ -842,7 +998,7 @@ export const PagePreview: React.FC = () => {
                       justifyContent: priceFormat === 'right-aligned' ? 'space-between' : 'flex-start',
                       alignItems: priceFormat === 'dot-leaders' ? 'baseline' : 'center',
                       gap: priceFormat === 'inline' ? '8px' : '0',
-                      paddingLeft: '12px',
+                      paddingLeft: '10px',
                     }}
                   >
                     <span style={{
@@ -855,7 +1011,7 @@ export const PagePreview: React.FC = () => {
                       {v.label}
                     </span>
                     {priceFormat === 'dot-leaders' && <div style={leaderStyle} />}
-                    <span style={priceStyle}>{variantPriceText}</span>
+                    <span style={priceStyle}>{stackedVariantPrice}</span>
                   </div>
                 )
               })}
@@ -865,7 +1021,7 @@ export const PagePreview: React.FC = () => {
           {item.description && <div style={descStyle}>{item.description}</div>}
 
           {item.tags && item.tags.length > 0 && (
-            <div style={{ marginTop: '4px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <div style={{ marginTop: '3px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
               {item.tags.map((tag: string, idx: number) => (
                 <span
                   key={idx}
@@ -892,12 +1048,14 @@ export const PagePreview: React.FC = () => {
       selectedItemId,
       pageLayout.typography,
       pageLayout.priceFormat,
+      pageLayout.pricePosition,
       pageLayout.colorScheme,
       pageLayout.currency,
       pageLayout.variantDisplayMode,
       pageLayout.variantSeparator,
       pageLayout.sectionTitleDecoration,
       renderSeparator,
+      selectItem,
     ]
   )
 
@@ -911,30 +1069,46 @@ export const PagePreview: React.FC = () => {
       const sectionSubtitleStyle = pageLayout.typography.sectionSubtitle
 
       const startIdx = layout.startItemIndex ?? 0
-      const allItems = (section.items || []).filter((item: any) => item.isAvailable !== false)
-      const endIdx = layout.endItemIndex ?? allItems.length
-      const visibleItems = allItems.slice(startIdx, endIdx)
+      const unfilteredItems = section.items || []
+      const totalCount = unfilteredItems.length
+
+      // Safety: if endItemIndex is set, verify a continuation fragment exists.
+      // If no continuation covers the remaining items, ignore endItemIndex to
+      // prevent items from silently disappearing.
+      let endIdx = layout.endItemIndex ?? totalCount
+      if (layout.endItemIndex != null && layout.endItemIndex < totalCount) {
+        const layouts = pageLayout.sectionLayouts || []
+        const hasContinuation = layouts.some(
+          (sl) => sl.sectionId === layout.sectionId && (sl.startItemIndex ?? 0) > startIdx
+        )
+        if (!hasContinuation) {
+          endIdx = totalCount // No continuation — show all remaining items
+        }
+      }
+
+      // Slice BEFORE filtering: endItemIndex was computed against unfiltered items
+      const visibleItems = unfilteredItems.slice(startIdx, endIdx).filter((item: any) => item.isAvailable !== false && !hiddenItemIds.includes(item.id))
       const isFirstFragment = startIdx === 0
-      const isLastFragment = endIdx >= allItems.length
+      const isLastFragment = endIdx >= totalCount
 
       const headerStyle: React.CSSProperties = {
         cursor: isDragging ? 'grabbing' : 'grab',
-        padding: '8px 12px',
+        padding: '6px 10px',
         borderBottom: `1px solid ${pageLayout.colorScheme.border}`,
         userSelect: 'none',
       }
 
-      const hasSubtitleContent = section.subtitle || section.footnote
+      const hasSubtitleContent = !!section.subtitle
 
       const titleStyle: React.CSSProperties = {
         fontFamily: sectionTitleStyle.fontFamily,
         fontSize: `${sectionTitleStyle.fontSize}pt`,
         fontWeight: sectionTitleStyle.fontWeight,
-        letterSpacing: `${sectionTitleStyle.letterSpacing}em`,
+        letterSpacing: `${sectionTitleStyle.letterSpacing}px`,
         lineHeight: sectionTitleStyle.lineHeight,
         textTransform: sectionTitleStyle.textTransform as any,
         textAlign: sectionTitleStyle.textAlign as any,
-        color: sectionTitleStyle.color || pageLayout.colorScheme.text,
+        color: sectionTitleStyle.color || pageLayout.colorScheme.accent,
         marginBottom: hasSubtitleContent ? '4px' : '0',
       }
 
@@ -942,14 +1116,14 @@ export const PagePreview: React.FC = () => {
         fontFamily: sectionSubtitleStyle.fontFamily,
         fontSize: `${sectionSubtitleStyle.fontSize}pt`,
         fontWeight: sectionSubtitleStyle.fontWeight,
-        letterSpacing: `${sectionSubtitleStyle.letterSpacing}em`,
+        letterSpacing: `${sectionSubtitleStyle.letterSpacing}px`,
         lineHeight: sectionSubtitleStyle.lineHeight,
         textTransform: sectionSubtitleStyle.textTransform as any,
         color: sectionSubtitleStyle.color || pageLayout.colorScheme.text,
       }
 
       const itemsContainerStyle: React.CSSProperties = {
-        padding: '16px',
+        padding: '10px 12px',
       }
 
       return (
@@ -958,7 +1132,7 @@ export const PagePreview: React.FC = () => {
           {isFirstFragment && (
             <div
               style={headerStyle}
-              onMouseDown={(e) => handleDragStart(e, section.id)}
+              onMouseDown={(e) => handleDragStart(e, section.id, getFragmentId(layout))}
             >
               {section.title && (
                 <div style={titleStyle}>
@@ -967,10 +1141,9 @@ export const PagePreview: React.FC = () => {
               )}
               {renderSectionTitleDecoration(pageLayout.sectionTitleDecoration, pageLayout.colorScheme.accent)}
               {section.subtitle && <div style={subtitleStyle}>{section.subtitle}</div>}
-              {section.footnote && <div style={subtitleStyle}>{section.footnote}</div>}
-              {/* Drag grip dots — visible on hover when section has explicit layout */}
+              {/* Drag grip dots — hidden during export */}
               {hasAnyExplicitLayouts && (
-                <div style={{
+                <div data-editor-only style={{
                   position: 'absolute', top: '4px', right: '4px',
                   opacity: 0.3, display: 'grid', gridTemplateColumns: '4px 4px',
                   gap: '2px', pointerEvents: 'none',
@@ -982,9 +1155,10 @@ export const PagePreview: React.FC = () => {
               )}
             </div>
           )}
-          {/* Continuation fragment header with "(cont.)" label */}
+          {/* Continuation fragment header with "(cont.)" label — hidden during export */}
           {!isFirstFragment && (
             <div
+              data-editor-only
               style={{
                 cursor: isDragging ? 'grabbing' : 'grab',
                 padding: '4px 12px',
@@ -994,7 +1168,7 @@ export const PagePreview: React.FC = () => {
                 alignItems: 'center',
                 borderBottom: `1px solid ${pageLayout.colorScheme.border}`,
               }}
-              onMouseDown={(e) => handleDragStart(e, section.id)}
+              onMouseDown={(e) => handleDragStart(e, section.id, getFragmentId(layout))}
             >
               <span style={{
                 fontFamily: sectionSubtitleStyle.fontFamily,
@@ -1021,6 +1195,23 @@ export const PagePreview: React.FC = () => {
           <div style={itemsContainerStyle}>
             {visibleItems.map((item: any) => renderItem(item, section.id))}
           </div>
+
+          {/* Footnote — shown below items on the last fragment only */}
+          {isLastFragment && section.footnote && (
+            <div style={{
+              padding: '4px 12px 6px',
+              fontFamily: sectionSubtitleStyle.fontFamily,
+              fontSize: `${sectionSubtitleStyle.fontSize}pt`,
+              fontWeight: sectionSubtitleStyle.fontWeight,
+              fontStyle: 'italic',
+              letterSpacing: `${sectionSubtitleStyle.letterSpacing}px`,
+              lineHeight: sectionSubtitleStyle.lineHeight,
+              color: sectionSubtitleStyle.color || pageLayout.colorScheme.text,
+              opacity: 0.8,
+            }}>
+              {section.footnote}
+            </div>
+          )}
         </>
       )
     },
@@ -1028,10 +1219,12 @@ export const PagePreview: React.FC = () => {
       pageLayout.typography,
       pageLayout.colorScheme,
       pageLayout.sectionTitleDecoration,
+      pageLayout.sectionLayouts,
       isDragging,
       hasAnyExplicitLayouts,
       handleDragStart,
       renderItem,
+      hiddenItemIds,
     ]
   )
 
@@ -1039,7 +1232,7 @@ export const PagePreview: React.FC = () => {
   // layoutKey is used as React key to distinguish split fragments of the same section
   const renderSectionFragment = useCallback(
     (section: any, layout: SectionLayout, layoutKey: string) => {
-      const isSelected = selectedSectionIds.includes(section.id)
+      const isSectionSelected = selectedSectionIds.includes(section.id)
       // Per-section color overrides
       const sectionColors = section.colorOverride
         ? {
@@ -1050,11 +1243,11 @@ export const PagePreview: React.FC = () => {
         : pageLayout.colorScheme
 
       const decStyle = decorationStyle(pageLayout.sectionDecoration, sectionColors, pageLayout.sectionDecorations)
-      const selectionBorder = isSelected ? '2px dashed #3b82f6' : undefined
       const sectionBg = section.colorOverride?.background || undefined
 
       if (!hasAnyExplicitLayouts) {
-        // Flow layout — no absolute positioning
+        // Flow layout — no absolute positioning, no split fragments
+        const selectionBorder = isSectionSelected ? '2px dashed #3b82f6' : undefined
         return (
           <div
             key={layoutKey}
@@ -1078,9 +1271,14 @@ export const PagePreview: React.FC = () => {
       const fragEndIdx = layout.endItemIndex ?? (section.items || []).length
       const fragTotalItems = (section.items || []).length
       const isSplitFragment = fragEndIdx < fragTotalItems || fragStartIdx > 0
+      const fragId = getFragmentId(layout)
+      // For explicit layouts, highlight only the specific clicked fragment
+      const isFragmentSelected = selectedFragmentId === fragId
+      const selectionBorder = isFragmentSelected ? '2px dashed #3b82f6' : undefined
 
       return (
         <div
+          ref={getSectionRefCallback(fragId)}
           key={layoutKey}
           style={{
             position: 'absolute',
@@ -1088,21 +1286,21 @@ export const PagePreview: React.FC = () => {
             top: `${bbox.y}%`,
             width: `${bbox.width}%`,
             height: `${bbox.height}%`,
-            zIndex: isSelected ? 10 : 1,
+            zIndex: isFragmentSelected ? 10 : 1,
             backgroundColor: sectionBg || pageLayout.colorScheme.background,
             ...decStyle,
             border: selectionBorder ?? decStyle.border ?? '1px solid transparent',
           }}
-          onClick={(e) => handleSectionClick(e, section.id)}
+          onClick={(e) => handleSectionClick(e, section.id, fragId)}
         >
           {/* Content wrapper — clips overflow to section box */}
           <div style={{ overflow: 'hidden', width: '100%', height: '100%' }}>
             {renderSectionContent(section, layout)}
           </div>
 
-          {/* Split indicator badge */}
+          {/* Split indicator badge — hidden during export */}
           {isSplitFragment && (
-            <div style={{
+            <div data-editor-only style={{
               position: 'absolute',
               bottom: '2px',
               right: '4px',
@@ -1118,19 +1316,26 @@ export const PagePreview: React.FC = () => {
             </div>
           )}
 
-          {/* Resize handles — only for primary selected section */}
-          {selectedSectionId === section.id && (
-            <PolygonEditor
-              sectionId={section.id}
-              polygon={layout.polygon}
-              contentWidthPx={contentWidthPx}
-              contentHeightPx={sectionsContainerHeight || contentHeightPx}
-              zoom={zoom}
-              bbox={bbox}
-              columnGridLines={columnGridLines}
-              onResizeEnd={() => handleResizeEnd(section.id, layout.startItemIndex ?? 0)}
-            />
-          )}
+          {/* Resize handles — only for the specific selected fragment */}
+          {selectedFragmentId === fragId && (() => {
+            // Compute per-page container height for this fragment's page
+            const fragPageIdx = layout.pageIndex ?? 0
+            const fragIsFirst = fragPageIdx === 0
+            const fragIsLast = fragPageIdx === totalLayoutPages - 1
+            const fragHeight = getContainerHeight(fragIsFirst, fragIsLast) || contentHeightPx
+            return (
+              <PolygonEditor
+                fragmentId={fragId}
+                polygon={layout.polygon}
+                contentWidthPx={contentWidthPx}
+                contentHeightPx={fragHeight}
+                zoom={zoom}
+                bbox={bbox}
+                columnGridLines={columnGridLines}
+                onResizeEnd={() => handleResizeEnd(fragId, section.id)}
+              />
+            )
+          })()}
         </div>
       )
     },
@@ -1139,24 +1344,28 @@ export const PagePreview: React.FC = () => {
       pageLayout.sectionDecoration,
       pageLayout.sectionDecorations,
       pageLayout.sectionGap,
-      selectedSectionId,
+      selectedFragmentId,
       selectedSectionIds,
       hasAnyExplicitLayouts,
+      isDragging,
       handleSectionClick,
       renderSectionContent,
       handleResizeEnd,
       contentWidthPx,
       contentHeightPx,
-      sectionsContainerHeight,
+      getContainerHeight,
+      totalLayoutPages,
       columnGridLines,
       zoom,
+      getSectionRefCallback,
     ]
   )
 
   // Build renderable fragments for a page's sections.
   // When explicit layouts exist, there may be multiple layout entries per section (splits).
+  // pageIdx filters layouts to only those belonging to this page, preventing duplicates.
   const renderPageSections = useCallback(
-    (sections: any[]) => {
+    (sections: any[], pageIdx: number) => {
       if (!hasAnyExplicitLayouts) {
         // Flow mode: one fragment per section, default layout with dividers
         const fragments: React.ReactNode[] = []
@@ -1175,16 +1384,33 @@ export const PagePreview: React.FC = () => {
       }
 
       // Explicit layout mode: render each layout entry (including split fragments)
+      // Filter by BOTH sectionId (must be on this page) AND pageIndex (must match this page)
       const layouts = pageLayout.sectionLayouts || []
       const sectionMap = new Map(sections.map((s) => [s.id, s]))
 
-      return layouts.map((layout, idx) => {
-        const section = sectionMap.get(layout.sectionId)
-        if (!section) return null
-        // Use sectionId + startItemIndex as unique key for splits
-        const key = `${layout.sectionId}-${layout.startItemIndex ?? 0}`
-        return renderSectionFragment(section, layout, key)
-      }).filter(Boolean)
+      const rendered = layouts
+        .filter((layout) => (layout.pageIndex ?? 0) === pageIdx)
+        .map((layout) => {
+          const section = sectionMap.get(layout.sectionId)
+          if (!section) return null
+          // Use sectionId + startItemIndex as unique key for splits
+          const key = `${layout.sectionId}-${layout.startItemIndex ?? 0}`
+          return renderSectionFragment(section, layout, key)
+        }).filter(Boolean)
+
+      // Safety: on page 0, render sections that have no layout entry in flow mode.
+      // This prevents sections added after auto-layout from being invisible.
+      if (pageIdx === 0) {
+        const layoutSectionIds = new Set(layouts.map((sl) => sl.sectionId))
+        for (const section of sections) {
+          if (!layoutSectionIds.has(section.id)) {
+            const fallbackLayout = getOrCreateSectionLayout(section.id)
+            rendered.push(renderSectionFragment(section, fallbackLayout, `fallback-${section.id}`))
+          }
+        }
+      }
+
+      return rendered
     },
     [hasAnyExplicitLayouts, pageLayout.sectionLayouts, pageLayout.sectionDivider, pageLayout.colorScheme, getOrCreateSectionLayout, renderSectionFragment]
   )
@@ -1205,7 +1431,7 @@ export const PagePreview: React.FC = () => {
       fontFamily: titleStyle.fontFamily,
       fontSize: `${titleStyle.fontSize}pt`,
       fontWeight: titleStyle.fontWeight,
-      letterSpacing: `${titleStyle.letterSpacing}em`,
+      letterSpacing: `${titleStyle.letterSpacing}px`,
       lineHeight: titleStyle.lineHeight,
       textTransform: titleStyle.textTransform as React.CSSProperties['textTransform'],
       color: titleStyle.color || pageLayout.colorScheme.text,
@@ -1215,7 +1441,7 @@ export const PagePreview: React.FC = () => {
       fontFamily: subtitleStyle.fontFamily,
       fontSize: `${subtitleStyle.fontSize}pt`,
       fontWeight: subtitleStyle.fontWeight,
-      letterSpacing: `${subtitleStyle.letterSpacing}em`,
+      letterSpacing: `${subtitleStyle.letterSpacing}px`,
       lineHeight: subtitleStyle.lineHeight,
       textTransform: subtitleStyle.textTransform as React.CSSProperties['textTransform'],
       color: subtitleStyle.color || pageLayout.colorScheme.text,
@@ -1342,18 +1568,60 @@ export const PagePreview: React.FC = () => {
 
       const hasStaticContent = staticTitle !== null || staticSubtitle !== null
 
+      // Draggable divider in custom mode
+      const dividerPos = menuData.dividerPosition
+      const positionedDivider = dividerPos && headerCfg.showDivider ? (
+        <div
+          style={{
+            position: 'absolute',
+            left: `${dividerPos.x}%`,
+            top: `${dividerPos.y}%`,
+            width: `${dividerPos.width}%`,
+            transform: 'translate(-50%, 0)',
+            height: '2px',
+            background: `linear-gradient(to right, transparent, ${pageLayout.colorScheme.accent}, transparent)`,
+            cursor: 'grab',
+            zIndex: 15,
+            userSelect: 'none',
+          }}
+          onMouseDown={handleDividerDragStart}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.outline = '1px dashed rgba(139,69,19,0.3)'; (e.currentTarget as HTMLElement).style.outlineOffset = '2px' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.outline = 'none' }}
+        />
+      ) : null
+
+      const staticDivider = !dividerPos && headerCfg.showDivider ? (
+        <div
+          style={{
+            width: '60%',
+            height: '2px',
+            background: `linear-gradient(to right, transparent, ${pageLayout.colorScheme.accent}, transparent)`,
+            margin: '8px auto 24px',
+            cursor: 'grab',
+            userSelect: 'none',
+          }}
+          onMouseDown={handleDividerDragStart}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.outline = '1px dashed rgba(139,69,19,0.3)'; (e.currentTarget as HTMLElement).style.outlineOffset = '2px' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.outline = 'none' }}
+        />
+      ) : null
+
+      const spacer = !headerCfg.showDivider ? <div style={{ marginBottom: '24px' }} /> : null
+
       return (
         <>
           {positionedTitle}
           {positionedSubtitle}
+          {positionedDivider}
           {hasStaticContent && (
             <div style={{ marginBottom: '32px', textAlign: 'center' }}>
               {staticTitle}
               {staticSubtitle}
-              {dividerEl}
+              {staticDivider}
+              {spacer}
             </div>
           )}
-          {!hasStaticContent && <div style={{ marginBottom: '32px', textAlign: 'center' }}>{dividerEl}</div>}
+          {!hasStaticContent && <div style={{ marginBottom: '32px', textAlign: 'center' }}>{staticDivider}{spacer}</div>}
         </>
       )
     }
@@ -1432,7 +1700,7 @@ export const PagePreview: React.FC = () => {
         {dividerEl}
       </div>
     )
-  }, [menuData, pageLayout.typography, pageLayout.colorScheme, pageLayout.headerConfig, handleTitleDragStart, handleSubtitleDragStart])
+  }, [menuData, pageLayout.typography, pageLayout.colorScheme, pageLayout.headerConfig, handleTitleDragStart, handleSubtitleDragStart, handleDividerDragStart])
 
   // Render dietary legend
   const renderDietaryLegend = useCallback(() => {
@@ -1514,7 +1782,7 @@ export const PagePreview: React.FC = () => {
           fontFamily: footerStyle.fontFamily,
           fontSize: `${footerStyle.fontSize}pt`,
           fontWeight: footerStyle.fontWeight,
-          letterSpacing: `${footerStyle.letterSpacing}em`,
+          letterSpacing: `${footerStyle.letterSpacing}px`,
           lineHeight: footerStyle.lineHeight,
           color: footerStyle.color || pageLayout.colorScheme.text,
         }}
@@ -1532,8 +1800,7 @@ export const PagePreview: React.FC = () => {
     return map
   }, [pageLayout.pages])
 
-  // Tri-fold state
-  const isTriFold = !!pageLayout.triFold?.enabled
+  // Tri-fold fold lines
   const triFoldFoldLines = useMemo(
     () => isTriFold ? getTriFoldFoldLinesByType(
       pageLayout.triFold!.paperSize,
@@ -1547,30 +1814,31 @@ export const PagePreview: React.FC = () => {
   // Otherwise fall back to SectionLayout.pageIndex grouping.
   const pageGroups = useMemo(() => {
     const groups = new Map<number, typeof menuData.sections>()
-    const allSections = menuData.sections || []
+    const allSections = (menuData.sections || []).filter(s => !hiddenSectionIds.includes(s.id))
 
-    // Tri-fold: 2 pages with sections from panelSections config
+    // Tri-fold: 2 pages — use sectionLayouts (which reflect flow across panels)
+    // rather than panelSections (which only stores the initial assignment).
     if (isTriFold && pageLayout.triFold) {
       const sectionMap = new Map(allSections.map((s) => [s.id, s]))
-      const ps = pageLayout.triFold.panelSections
-      // Page 0 (front): back, inner-flap, cover
-      const frontSections: typeof allSections = []
-      for (const panel of TRI_FOLD_FRONT_PANELS) {
-        for (const id of ps[panel] ?? []) {
-          const s = sectionMap.get(id)
-          if (s) frontSections.push(s)
+      const seenPerPage = new Map<number, Set<string>>()
+
+      for (const layout of pageLayout.sectionLayouts || []) {
+        const pageIdx = layout.pageIndex ?? 0
+        if (!groups.has(pageIdx)) {
+          groups.set(pageIdx, [])
+          seenPerPage.set(pageIdx, new Set())
+        }
+        const seen = seenPerPage.get(pageIdx)!
+        if (!seen.has(layout.sectionId)) {
+          seen.add(layout.sectionId)
+          const section = sectionMap.get(layout.sectionId)
+          if (section) groups.get(pageIdx)!.push(section)
         }
       }
-      groups.set(0, frontSections)
-      // Page 1 (back/inside): inside-left, inside-center, inside-right
-      const backSections: typeof allSections = []
-      for (const panel of TRI_FOLD_BACK_PANELS) {
-        for (const id of ps[panel] ?? []) {
-          const s = sectionMap.get(id)
-          if (s) backSections.push(s)
-        }
-      }
-      groups.set(1, backSections)
+
+      // Ensure both pages exist even if empty (tri-fold always has 2 pages)
+      if (!groups.has(0)) groups.set(0, [])
+      if (!groups.has(1)) groups.set(1, [])
       return Array.from(groups.entries()).sort((a, b) => a[0] - b[0])
     }
 
@@ -1609,111 +1877,59 @@ export const PagePreview: React.FC = () => {
     }
 
     return Array.from(groups.entries()).sort((a, b) => a[0] - b[0])
-  }, [menuData.sections, pageLayout.sectionLayouts, pageLayout.pages, hasAnyExplicitLayouts, isTriFold, pageLayout.triFold])
+  }, [menuData.sections, pageLayout.sectionLayouts, pageLayout.pages, hasAnyExplicitLayouts, isTriFold, pageLayout.triFold, hiddenSectionIds])
 
   const totalPages = pageGroups.length > 0 ? pageGroups[pageGroups.length - 1][0] + 1 : 1
 
   return (
     <div data-preview-container className="w-full h-full overflow-auto bg-neutral-100">
-      {/* Zoom toolbar */}
-      <div className="sticky top-0 z-[100] bg-white border-b border-neutral-200 px-4 py-2 flex items-center gap-3 justify-center">
-        {/* Zoom controls pill */}
-        <div className="flex items-center bg-neutral-100 rounded-lg">
-          <button
-            onClick={zoomOut}
-            className="px-3 py-1.5 text-sm font-bold text-neutral-600 hover:bg-neutral-200 rounded-l-lg transition-colors"
-            aria-label="Zoom out"
-          >
-            -
-          </button>
-          <span className="text-xs font-medium min-w-[50px] text-center text-neutral-700" aria-live="polite">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={zoomIn}
-            className="px-3 py-1.5 text-sm font-bold text-neutral-600 hover:bg-neutral-200 rounded-r-lg transition-colors"
-            aria-label="Zoom in"
-          >
-            +
-          </button>
-        </div>
-
-        <button
-          onClick={resetZoom}
-          className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-white border border-neutral-300 rounded-md hover:bg-neutral-50 transition-colors"
-        >
-          Reset
-        </button>
-
-        <button
-          onClick={() => {
-            const container = document.querySelector('[data-preview-container]')
-            if (container) {
-              const rect = container.getBoundingClientRect()
-              const fitW = (rect.width - 80) / pageWidthPx
-              const fitH = (rect.height - 120) / pageHeightPx
-              const fit = Math.min(fitW, fitH, 2.0)
-              useUIStore.getState().setZoom(Math.max(0.25, fit))
-            }
-          }}
-          className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-white border border-neutral-300 rounded-md hover:bg-neutral-50 transition-colors"
-          title="Zoom to fit page in view"
-        >
-          Fit
-        </button>
-
-        {/* Side-by-side / Stacked toggle (only when multi-page) */}
-        {totalPages > 1 && (
-          <>
-            <span className="w-px h-5 bg-neutral-200" />
-            <div className="flex items-center">
-              <button
-                onClick={() => setPreviewLayout('stacked')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-l-md border transition-colors ${
-                  previewLayout === 'stacked'
-                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-semibold'
-                    : 'border-neutral-300 bg-white text-neutral-500 hover:bg-neutral-50'
-                }`}
-                title="Stack pages vertically"
-              >
-                Stacked
-              </button>
-              <button
-                onClick={() => {
-                  setPreviewLayout('side-by-side')
-                  const container = document.querySelector('[data-preview-container]')
-                  if (container) {
-                    const rect = container.getBoundingClientRect()
-                    const totalWidthPx = (pageWidthPx * totalPages) + (40 * (totalPages - 1))
-                    const fitW = (rect.width - 80) / totalWidthPx
-                    const fitH = (rect.height - 120) / pageHeightPx
-                    const fit = Math.min(fitW, fitH, 2.0)
-                    useUIStore.getState().setZoom(Math.max(0.25, fit))
-                  }
-                }}
-                className={`px-3 py-1.5 text-xs font-medium rounded-r-md border border-l-0 transition-colors ${
-                  previewLayout === 'side-by-side'
-                    ? 'border-amber-600 bg-amber-50 text-amber-800 font-semibold'
-                    : 'border-neutral-300 bg-white text-neutral-500 hover:bg-neutral-50'
-                }`}
-                title="Show pages side by side"
-              >
-                Side by Side
-              </button>
-            </div>
-          </>
-        )}
-
-        {totalPages > 1 && (
-          <span className="ml-1 px-2.5 py-1 bg-amber-100 text-amber-800 rounded text-xs font-semibold">
+      {/* Multi-page and overflow bar */}
+      {totalPages > 1 && (
+        <div className="sticky top-0 z-[100] bg-white border-b border-neutral-200 px-4 py-1.5 flex items-center gap-3 justify-center">
+          <div className="flex items-center">
+            <button
+              onClick={() => setPreviewLayout('stacked')}
+              className={`px-3 py-1 text-xs font-medium rounded-l-md border transition-colors ${
+                previewLayout === 'stacked'
+                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-semibold'
+                  : 'border-neutral-300 bg-white text-neutral-500 hover:bg-neutral-50'
+              }`}
+              title="Stack pages vertically"
+            >
+              Stacked
+            </button>
+            <button
+              onClick={() => {
+                setPreviewLayout('side-by-side')
+                const container = document.querySelector('[data-preview-container]')
+                if (container) {
+                  const rect = container.getBoundingClientRect()
+                  const totalWidthPx = (pageWidthPx * totalPages) + (40 * (totalPages - 1))
+                  const fitW = (rect.width - 80) / totalWidthPx
+                  const fitH = (rect.height - 120) / pageHeightPx
+                  const fit = Math.min(fitW, fitH, 2.0)
+                  useUIStore.getState().setZoom(Math.max(0.25, fit))
+                }
+              }}
+              className={`px-3 py-1 text-xs font-medium rounded-r-md border border-l-0 transition-colors ${
+                previewLayout === 'side-by-side'
+                  ? 'border-amber-600 bg-amber-50 text-amber-800 font-semibold'
+                  : 'border-neutral-300 bg-white text-neutral-500 hover:bg-neutral-50'
+              }`}
+              title="Show pages side by side"
+            >
+              Side by Side
+            </button>
+          </div>
+          <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded text-xs font-semibold">
             {totalPages} pages
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Overflow warning bar (separate row) */}
+      {/* Overflow warning bar */}
       {overflowState && overflowState.isOverflowing && (
-        <div className="sticky top-[41px] z-[99] bg-amber-50 border-b border-amber-100 px-4 py-2 flex items-center gap-2 justify-center">
+        <div className={`sticky ${totalPages > 1 ? 'top-[37px]' : 'top-0'} z-[99] bg-amber-50 border-b border-amber-100 px-4 py-2 flex items-center gap-2 justify-center`}>
           <span className="text-xs font-semibold text-amber-800">
             Content overflows by {overflowState.overflowPercent || Math.round((overflowState.overflowAmount / overflowState.availableHeight) * 100)}%
           </span>
@@ -1761,6 +1977,7 @@ export const PagePreview: React.FC = () => {
                 width: `${scaledPageWidth}px`,
                 height: `${scaledPageHeight}px`,
                 position: 'relative',
+                zIndex: pageIdx === selectedFragmentPageIdx ? 10 : 0,
               }}
             >
               {/* Page number badge */}
@@ -1781,7 +1998,9 @@ export const PagePreview: React.FC = () => {
 
               {/* Actual page */}
               <div
+                id={isFirstPage ? 'page-preview' : undefined}
                 className="print-page"
+                data-page-index={pageIdx}
                 style={{
                   width: `${pageWidthPx}px`,
                   height: `${pageHeightPx}px`,
@@ -1807,11 +2026,11 @@ export const PagePreview: React.FC = () => {
                     color: pageLayout.colorScheme.text,
                   }}
                 >
-                  {/* Header on first page only */}
-                  {isFirstPage && renderHeader()}
+                  {/* Header on first page only (suppressed in tri-fold mode) */}
+                  {isFirstPage && !isTriFold && renderHeader()}
 
-                  {/* Logo — absolutely positioned within content area (custom preset only) */}
-                  {isFirstPage && menuData.logo && (pageLayout.headerConfig?.preset ?? 'centered-stack') === 'custom' && (
+                  {/* Logo — absolutely positioned within content area (custom preset only, suppressed in tri-fold) */}
+                  {isFirstPage && !isTriFold && menuData.logo && (pageLayout.headerConfig?.preset ?? 'centered-stack') === 'custom' && (
                     <div
                       style={{
                         position: 'absolute',
@@ -1930,13 +2149,53 @@ export const PagePreview: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Behind-layer elements (z-index 0, behind sections) */}
+                  {(menuData.pageImages || [])
+                    .filter((img) => img.pageIndex === pageIdx && img.layer === 'behind')
+                    .map((img) => (
+                      <div key={img.id} style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+                        <div style={{ position: 'relative', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          <DraggableImage
+                            image={img}
+                            isSelected={selectedPageImageId === img.id}
+                            contentWidthPx={contentWidthPx}
+                            contentHeightPx={contentHeightPx}
+                            zoom={zoom}
+                            onSelect={handlePageImageSelect}
+                            onUpdate={handlePageImageUpdate}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  {(menuData.textFrames || [])
+                    .filter((tf) => tf.pageIndex === pageIdx && tf.layer === 'behind')
+                    .map((tf) => (
+                      <div key={tf.id} style={{ position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+                        <div style={{ position: 'relative', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          <DraggableTextFrame
+                            frame={tf}
+                            isSelected={selectedTextFrameId === tf.id}
+                            contentWidthPx={contentWidthPx}
+                            contentHeightPx={contentHeightPx}
+                            zoom={zoom}
+                            onSelect={handleTextFrameSelect}
+                            onUpdate={handleTextFrameUpdate}
+                            onUpdateContent={handleTextFrameContentUpdate}
+                          />
+                        </div>
+                      </div>
+                    ))}
+
                   {/* Sections container */}
                   <div
                     ref={isFirstPage ? sectionsRef : undefined}
                     style={{
                       position: 'relative',
                       minHeight: hasAnyExplicitLayouts ? undefined : '200px',
-                      height: sectionsContainerHeight != null ? `${sectionsContainerHeight}px` : undefined,
+                      height: (() => {
+                        const h = getContainerHeight(isFirstPage, isLastPage)
+                        return h != null ? `${h}px` : undefined
+                      })(),
                     }}
                   >
                     {/* Snap guide lines — visible during drag */}
@@ -1955,12 +2214,49 @@ export const PagePreview: React.FC = () => {
                         }}
                       />
                     ))}
-                    {renderPageSections(sections)}
+                    {renderPageSections(sections, pageIdx)}
                   </div>
 
-                  {/* Dietary legend + Footer on last page only */}
-                  {isLastPage && renderDietaryLegend()}
-                  {isLastPage && renderFooter()}
+                  {/* Front-layer elements (z-index 12, in front of sections) */}
+                  {(menuData.pageImages || [])
+                    .filter((img) => img.pageIndex === pageIdx && img.layer === 'front')
+                    .map((img) => (
+                      <div key={img.id} style={{ position: 'absolute', inset: 0, zIndex: 12, pointerEvents: 'none' }}>
+                        <div style={{ position: 'relative', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          <DraggableImage
+                            image={img}
+                            isSelected={selectedPageImageId === img.id}
+                            contentWidthPx={contentWidthPx}
+                            contentHeightPx={contentHeightPx}
+                            zoom={zoom}
+                            onSelect={handlePageImageSelect}
+                            onUpdate={handlePageImageUpdate}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  {(menuData.textFrames || [])
+                    .filter((tf) => tf.pageIndex === pageIdx && tf.layer === 'front')
+                    .map((tf) => (
+                      <div key={tf.id} style={{ position: 'absolute', inset: 0, zIndex: 12, pointerEvents: 'none' }}>
+                        <div style={{ position: 'relative', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                          <DraggableTextFrame
+                            frame={tf}
+                            isSelected={selectedTextFrameId === tf.id}
+                            contentWidthPx={contentWidthPx}
+                            contentHeightPx={contentHeightPx}
+                            zoom={zoom}
+                            onSelect={handleTextFrameSelect}
+                            onUpdate={handleTextFrameUpdate}
+                            onUpdateContent={handleTextFrameContentUpdate}
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                  {/* Dietary legend + Footer on last page only (suppressed in tri-fold) */}
+                  {isLastPage && !isTriFold && renderDietaryLegend()}
+                  {isLastPage && !isTriFold && renderFooter()}
                 </div>
 
                 {/* Tri-fold fold lines, panel labels, and special panel content */}

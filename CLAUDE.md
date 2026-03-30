@@ -62,6 +62,14 @@ src/
 - **Tri-fold support:** Letter-fold, z-fold, gate-fold types on letter/legal paper with 6 panels.
 - **Preview rendering:** Inline styles in PagePreview.tsx for accurate print output (not Tailwind), since these styles must match PDF export exactly.
 
+## Layout Engine Principles
+
+- **Single source of truth:** `pageLayout.sectionLayouts` polygon data is what gets rendered. Never override positions at render time — if corrections are needed, write them back to the store.
+- **No competing systems:** Avoid layering multiple systems that independently control the same property (e.g., position/height). When auto-layout estimates differ from actual DOM measurements, commit corrections to the store once, don't apply ephemeral overrides every render.
+- **Drag/resize operate on truth:** User interactions (drag, resize) must read and write the same data that rendering uses. If rendering applies transforms the interaction code doesn't know about, positions will jump.
+- **`useLayoutCommit`:** One-shot hook that measures DOM heights after auto-layout and writes corrected polygons back to the store (undo-invisible). Only runs when `pendingLayoutCommit` flag is set by auto-layout call sites.
+- **Content clips, not expands:** Sections use `overflow: hidden`. If content is taller than its polygon box, it clips. User can resize or re-run auto-layout.
+
 ## Design System
 
 - **Accent color:** Amber-700/600 throughout the app. Do NOT use blue for active/selected states (except template category pills which have per-category colors).

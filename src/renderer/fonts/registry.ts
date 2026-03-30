@@ -58,3 +58,29 @@ export function getAllFontFamilies(): string[] {
     ...FONT_REGISTRY.map((f) => f.family),
   ]
 }
+
+export function getFontsByCategory(): Map<string, { family: string; category: string }[]> {
+  const groups = new Map<string, { family: string; category: string }[]>()
+
+  // System fonts first
+  const systemGroup: { family: string; category: string }[] = SYSTEM_FONTS.map(f => ({ family: f.family, category: f.category }))
+  groups.set('System', systemGroup)
+
+  // Group FONT_REGISTRY by category
+  const categoryLabels: Record<string, string> = {
+    'serif': 'Serif',
+    'sans-serif': 'Sans-Serif',
+    'display': 'Display',
+    'script': 'Script',
+  }
+
+  for (const entry of FONT_REGISTRY) {
+    const label = categoryLabels[entry.category] || entry.category
+    if (!groups.has(label)) {
+      groups.set(label, [])
+    }
+    groups.get(label)!.push({ family: entry.family, category: entry.category })
+  }
+
+  return groups
+}

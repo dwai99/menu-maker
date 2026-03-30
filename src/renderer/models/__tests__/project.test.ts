@@ -41,7 +41,7 @@ describe('Project Model', () => {
                 pageLayout: {
                     pageSize: 'letter',
                     orientation: 'portrait',
-                    margins: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
                     columnCount: 1,
                     layoutDirection: 'vertical',
                     sectionLayouts: [],
@@ -71,7 +71,7 @@ describe('Project Model', () => {
                 pageLayout: {
                     pageSize: 'letter',
                     orientation: 'portrait',
-                    margins: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
                     columnCount: 1,
                     layoutDirection: 'vertical',
                     sectionLayouts: [],
@@ -100,7 +100,7 @@ describe('Project Model', () => {
                 pageLayout: {
                     pageSize: 'letter',
                     orientation: 'portrait',
-                    margins: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
                     sectionLayouts: [
                         { sectionId: 'sec-1', x: 0, y: 0, width: 50, height: 50, columnCount: 1, pageIndex: 0 },
                     ],
@@ -126,7 +126,7 @@ describe('Project Model', () => {
                 pageLayout: {
                     pageSize: 'letter',
                     orientation: 'portrait',
-                    margins: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
                     columnCount: 1,
                     sectionLayouts: [],
                     colorScheme: { background: '#fff', text: '#000', accent: '#333', border: '#ccc' },
@@ -148,6 +148,52 @@ describe('Project Model', () => {
             expect(result.pageLayout.sectionGap).toBe(16)
         })
 
+        it('should backfill triFold config when pageSize is tri-fold', () => {
+            const input = {
+                version: 3,
+                menuData: {
+                    title: 'Tri-Fold Menu', subtitle: '', footer: '',
+                    sections: [
+                        { id: 'sec-1', title: 'Apps', items: [] },
+                        { id: 'sec-2', title: 'Mains', items: [] },
+                    ],
+                },
+                pageLayout: {
+                    pageSize: 'tri-fold',
+                    orientation: 'portrait',
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
+                    columnCount: 6,
+                    layoutDirection: 'vertical',
+                    sectionLayouts: [],
+                    colorScheme: { background: '#fff', text: '#000', accent: '#333', border: '#ccc' },
+                    typography: {},
+                    itemSeparator: 'none',
+                    priceFormat: 'right-aligned',
+                    sectionDecoration: 'none',
+                    currency: '$',
+                    backgroundTexture: 'none',
+                    sectionDivider: 'none',
+                    pageBorder: 'none',
+                    sectionGap: 16,
+                },
+                createdAt: '2024-01-01',
+                updatedAt: '2024-01-01',
+            }
+            const result = migrateProject(input)
+            // Should create triFold config
+            expect(result.pageLayout.triFold).toBeDefined()
+            expect(result.pageLayout.triFold!.enabled).toBe(true)
+            expect(result.pageLayout.triFold!.paperSize).toBe('letter')
+            expect(result.pageLayout.triFold!.foldType).toBe('letter-fold')
+            // pageSize should be corrected from 'tri-fold' to 'letter'
+            expect(result.pageLayout.pageSize).toBe('letter')
+            expect(result.pageLayout.orientation).toBe('landscape')
+            // Margins should be set to 0.25" for tri-fold
+            expect(result.pageLayout.margins).toEqual({ top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 })
+            // All sections should be queued in inside-left for sequential flow
+            expect(result.pageLayout.triFold!.panelSections['inside-left']).toEqual(['sec-1', 'sec-2'])
+        })
+
         it('should add columnCount when missing in v1', () => {
             const input = {
                 version: 1,
@@ -155,7 +201,7 @@ describe('Project Model', () => {
                 pageLayout: {
                     pageSize: 'letter',
                     orientation: 'portrait',
-                    margins: { top: 0.75, right: 0.75, bottom: 0.75, left: 0.75 },
+                    margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
                     sectionLayouts: [],
                     colorScheme: { background: '#fff', text: '#000', accent: '#333', border: '#ccc' },
                     typography: {},

@@ -2,10 +2,19 @@ import { MenuData, createDefaultMenuData } from './menu'
 import { PageLayout, createDefaultPageLayout } from './layout'
 import type { Vertex, SectionLayout } from './layout'
 
+export interface LayoutView {
+  id: string
+  name: string
+  pageLayout: PageLayout
+  hiddenSectionIds?: string[]
+  hiddenItemIds?: string[]
+}
+
 export interface MenuProject {
   version: 1 | 2 | 3
   menuData: MenuData
   pageLayout: PageLayout
+  layoutViews?: LayoutView[]
   createdAt: string
   updatedAt: string
 }
@@ -51,6 +60,37 @@ export function migrateProject(project: any): MenuProject {
       pageLayout: {
         ...project.pageLayout,
         sectionDecorations: dec === 'none' ? [] : [dec],
+      },
+    }
+  }
+
+  // Backfill triFold config when pageSize is 'tri-fold' but config is missing
+  if (project.pageLayout && project.pageLayout.pageSize === 'tri-fold' && !project.pageLayout.triFold) {
+    const sectionIds = (project.menuData?.sections || []).map((s: any) => s.id)
+    project = {
+      ...project,
+      pageLayout: {
+        ...project.pageLayout,
+        pageSize: 'letter',  // tri-fold uses letter/legal, not "tri-fold"
+        orientation: 'landscape',
+        margins: { top: 0.25, right: 0.25, bottom: 0.25, left: 0.25 },
+        triFold: {
+          enabled: true,
+          paperSize: 'letter',
+          foldType: 'letter-fold',
+          panelSections: {
+            'cover': [],
+            'back': [],
+            'inner-flap': [],
+            'inside-left': sectionIds,
+            'inside-center': [],
+            'inside-right': [],
+          },
+          coverShowTitle: true,
+          coverShowSubtitle: true,
+          coverShowLogo: true,
+          backShowFooter: true,
+        },
       },
     }
   }

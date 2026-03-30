@@ -156,12 +156,22 @@ export const useExportImage = () => {
                 cacheBust: true,
             }
 
+            // Hide editor-only elements (split badges, cont. labels) during capture
+            const hideStyle = document.createElement('style')
+            hideStyle.id = 'export-hide-editor-only'
+            hideStyle.textContent = '[data-editor-only] { display: none !important; }'
+            document.head.appendChild(hideStyle)
+
             let dataUrl: string
 
-            if (format === 'jpeg') {
-                dataUrl = await toJpeg(element, { ...captureOptions, quality })
-            } else {
-                dataUrl = await toPng(element, captureOptions)
+            try {
+                if (format === 'jpeg') {
+                    dataUrl = await toJpeg(element, { ...captureOptions, quality })
+                } else {
+                    dataUrl = await toPng(element, captureOptions)
+                }
+            } finally {
+                hideStyle.remove()
             }
 
             // Composite print marks if enabled
@@ -188,5 +198,81 @@ export const useExportImage = () => {
         }
     }, [pageLayout.pageSize, pageLayout.orientation, pageLayout.printMarks])
 
-    return { exportImage }
+    const exportAllPages = useCallback(async (options: ExportImageOptions = { format: 'png' }) => {
+        if (!window.electronAPI) return
+        const { format, quality = 0.92, scale = 2 } = options
+
+        try {
+            const pages = document.querySelectorAll('.print-page')
+            if (pages.length <= 1) {
+                // Single page — use regular export
+                return exportImage(options)
+            }
+
+            // Ask user for a directory
+            const dirResult = await window.electronAPI.showSaveDirectoryDialog()
+            if (dirResult.canceled || !dirResult.directoryPath) return
+
+            const pageDims = PAGE_SIZES[pageLayout.pageSize]
+            const pageWidthInches = pageLayout.orientation === 'portrait' ? pageDims.width : pageDims.height
+            const pageHeightInches = pageLayout.orientation === 'portrait' ? pageDims.height : pageDims.width
+            const DPI = 96
+            const fullWidth = Math.round(pageWidthInches * DPI * scale)
+            const fullHeight = Math.round(pageHeightInches * DPI * scale)
+
+            const captureOptions = {
+                width: fullWidth,
+                height: fullHeight,
+                style: {
+                    transform: 'none',
+                    transformOrigin: 'top left',
+                    width: `${pageWidthInches * DPI}px`,
+                    height: `${pageHeightInches * DPI}px`,
+                },
+                canvasWidth: fullWidth,
+                canvasHeight: fullHeight,
+                pixelRatio: 1,
+                cacheBust: true,
+            }
+
+            // Hide editor-only elements during capture
+            const hideStyle = document.createElement('style')
+            hideStyle.id = 'export-hide-editor-only'
+            hideStyle.textContent = '[data-editor-only] { display: none !important; }'
+            document.head.appendChild(hideStyle)
+
+            let exported = 0
+            try {
+                for (let i = 0; i < pages.length; i++) {
+                    const pageEl = pages[i] as HTMLElement
+                    let dataUrl: string
+                    if (format === 'jpeg') {
+                        dataUrl = await toJpeg(pageEl, { ...captureOptions, quality })
+                    } else {
+                        dataUrl = await toPng(pageEl, captureOptions)
+                    }
+
+                    // Composite print marks if enabled
+                    const pm = pageLayout.printMarks
+                    if (pm && (pm.showCropMarks || pm.showRegistrationMarks)) {
+                        dataUrl = await composePrintMarks(dataUrl, fullWidth, fullHeight, pm, scale, format, quality)
+                    }
+
+                    const ext = format === 'jpeg' ? 'jpg' : 'png'
+                    const filePath = `${dirResult.directoryPath}/menu-${i + 1}.${ext}`
+                    const saveResult = await window.electronAPI.saveImageToPath({ dataUrl, filePath })
+                    if (saveResult.success) exported++
+                }
+            } finally {
+                hideStyle.remove()
+            }
+
+            alert(`Exported ${exported} page${exported !== 1 ? 's' : ''} to ${dirResult.directoryPath}`)
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            alert(`Failed to export images: ${errorMessage}`)
+        }
+    }, [pageLayout.pageSize, pageLayout.orientation, pageLayout.printMarks, exportImage])
+
+    return { exportImage, exportAllPages }
 }

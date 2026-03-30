@@ -141,13 +141,13 @@ describe('Layout Models', () => {
             expect(layout.orientation).toBe('portrait')
         })
 
-        it('should have 0.75in margins on all sides', () => {
+        it('should have 0.25in margins on all sides', () => {
             const layout = createDefaultPageLayout()
             expect(layout.margins).toEqual({
-                top: 0.75,
-                right: 0.75,
-                bottom: 0.75,
-                left: 0.75,
+                top: 0.25,
+                right: 0.25,
+                bottom: 0.25,
+                left: 0.25,
             })
         })
 

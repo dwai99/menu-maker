@@ -1,0 +1,396 @@
+{
+  "version": 2,
+  "menuData": {
+    "title": "ALARY'S CRAFTED COMFORT",
+    "subtitle": "(651) 224-7717 • www.alarys.com • 139 7th St E, Saint Paul, MN, 55101",
+    "sections": [
+      {
+        "id": "9lzOsqOxPSemj_16rQiTZ",
+        "title": "APPS",
+        "subtitle": "",
+        "footnote": "",
+        "items": [
+          {
+            "id": "QhB-6Lgl7Z1QS2wJFoI4f",
+            "name": "Wings",
+            "description": "Tossed in Buffalo, Jerk, BBQ, or Korean BBQ sauce. Dry Ranch or House Seasoning Dry Rub. Served with celery and your choice of bleu cheese or ranch.",
+            "price": "15.49",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "xYWuzIeH1_yxPcCkDGdaV",
+            "name": "French Fries with Truffle Dip",
+            "description": "Scoop Fries, Parmesan served with Truffle Aioli",
+            "price": "8.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "OcE-pmCq_lNQz4hH6CDmD",
+            "name": "Firecracker Shrimp",
+            "description": "Crispy fried shrimp hand-tossed in our signature Firecracker Sauce. Served on a bed of honey-lime slaw.",
+            "price": "13.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "rNVKH_LzdABhvq8T14x4H",
+            "name": "Elote Dip",
+            "description": "Roasted Corn, Triple Cheese blend, Chipotle, house made tortilla chips.",
+            "price": "12.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "R2BBW7TLbG3SRkUzwSXhN",
+            "name": "Cheese Curds",
+            "description": "Beer battered Ellsworth Cheese Curds served with a side of Ranch.",
+            "price": "10.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "oSqyl93G7NnncNB8Zevyq",
+            "name": "Nachos",
+            "description": "Start with our house-made tortilla chips and add Jalapeno queso, pico de gallo, shredded lettuce, sport peppers, elote crema, and cilantro. Add: chicken tinga or seasoned ground beef $2. Serves 2-4.",
+            "price": "15.99",
+            "priceLabel": "Half order $9.49",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "zI14Uh4mAeG189TmYpwZo",
+            "name": "Pretzels",
+            "description": "4 freshly baked pretzel loaves topped with Everything Bagel seasoning. Jalapeno queso on the side for dipping.",
+            "price": "12.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "Bb44sWqS6dRq0iG9R4oKc",
+            "name": "Chicago Beef Egg Rolls",
+            "description": "Shaved ribeye, provolone, roasted red peppers, caramelized onion enveloped in an egg roll casing. Topped with spicy giardiniera. Au Jus for dipping.",
+            "price": "13.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "TDXPxSatSb5ScM5U5mHhA",
+            "name": "Homemade Soup",
+            "description": "Creamy Chicken Wild Rice or Soup of the Day",
+            "price": "5.50",
+            "priceLabel": "Cup $5.50 / Bowl $8.50",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "e3lmtFznqehERJhTqIzgs",
+            "name": "Fish & Chips",
+            "description": "Crispy beer battered pollock served with french fries, honey-lime slaw and tartar sauce.",
+            "price": "17.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          }
+        ]
+      },
+      {
+        "id": "eXH8e9_vGHmYZEH4EXWnP",
+        "title": "SALADS",
+        "subtitle": "Add to any salad: chicken $3.00, fried shrimp $4.00",
+        "footnote": "",
+        "items": [
+          {
+            "id": "QLm-eWISpBLO9bjS4c-4p",
+            "name": "Apple and Berry Salad",
+            "description": "Spring mix, candied walnuts, seasonal berries, apple, red onion, goat cheese and strawberry vinaigrette.",
+            "price": "14.99",
+            "priceLabel": "Half Salad $8.99",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "SJayyZspUXIEpYSQkaV15",
+            "name": "Classic Wedge Salad",
+            "description": "Iceberg Lettuce, bacon, tomatoes, pickled red onion, blue cheese crumbles and dressing.",
+            "price": "13.99",
+            "priceLabel": "Half Salad $7.99",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "elQFxn0qofL0mlrqB8C0b",
+            "name": "Taco Salad",
+            "description": "Iceberg and Romaine, shredded cheese, pico de gallo, sport peppers, cilantro, roasted corn, and elote crema served in crispy taco shell. Topped with tortilla strips. Add at no cost: chicken tinga or seasoned ground beef.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "E6VKbfTW5R4bl6CCdP1Ei",
+            "name": "Caesar Salad",
+            "description": "Romaine tossed with Caesar dressing and topped with garlic croutons and shaved parmesan.",
+            "price": "13.99",
+            "priceLabel": "Half Salad $7.99",
+            "tags": [],
+            "isAvailable": true
+          }
+        ]
+      },
+      {
+        "id": "dhhh37DdrrDkJzWU9yGmz",
+        "title": "HANDHELDS",
+        "subtitle": "",
+        "footnote": "Served with kettle chips. Substitute fries, tots, or small house salad $2. Soup $4.",
+        "items": [
+          {
+            "id": "mw71IbcQd4qd9O8l3doKR",
+            "name": "Chicago Dog",
+            "description": "1/4 pound all beef Vienna dog, relish, sport peppers, pickles, tomato, onion.",
+            "price": "13.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "zNm3PWl1jwMtl5ovHJR1p",
+            "name": "Chicago Beef",
+            "description": "Shaved ribeye, provolone cheese, spicy giardiniera on an Italian roll. Au Jus for dipping.",
+            "price": "17.49",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "gmdjfLH-JB9d6rPFdNsQy",
+            "name": "Philly Cheesesteak",
+            "description": "Shaved ribeye, with peppers and onions and jalapeno queso, served on a fresh hoagie roll.",
+            "price": "17.49",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "mrZzM9KrVu4SY69G-IbDb",
+            "name": "Pork Carnitas Tacos",
+            "description": "3 Tacos. Braised Pork, Pico De Gallo, Pickled Red Onion. Served with Mexican rice.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "U0zTkRfHslKvECrNoFl_A",
+            "name": "Crispy Shrimp Tacos",
+            "description": "Crispy fried shrimp, honey lime slaw and mango. Served with Mexican rice.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "ZNuqdLK4AvkpRBpEmqFvy",
+            "name": "Build It: Burger",
+            "description": "Lettuce, Pickle, Raw Onion: $0.25; Tomato, Jalapeno, Pickled Red Onion: $0.50; Bacon $1; Cheddar, Provolone, Pepper Jack: $2.",
+            "price": "12.50",
+            "priceLabel": "Dog $8.99",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "iIHIwHNryv1QruAa7u19e",
+            "name": "Big Mc Style Burger",
+            "description": "White American cheese, shredded lettuce, pickles, and 1000 island dressing.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "NE3_HpBgkKs1k5-atxoYf",
+            "name": "Storm Burger",
+            "description": "Topped with provolone cheese, bacon, pickled red onion, avocado smash, lettuce and tomato.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "AIqTKTtP45KPFotxRf0Yv",
+            "name": "BBQ Burger",
+            "description": "BBQ rub, pepperjack, bacon, pickled red onion, BBQ sauce.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "GjJgQQEhZSaHX5Q0GugVF",
+            "name": "Elote Fried Chicken Sandwich",
+            "description": "Roasted corn, cotija cheese, elote aioli.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "uwlUkTtSNv5j9MRtKOFnA",
+            "name": "7th St Chicken Sandwich",
+            "description": "Marinated chicken topped with cheddar and provolone cheese, bacon, sriracha aioli, hoagie roll.",
+            "price": "15.99",
+            "priceLabel": "",
+            "tags": [],
+            "isAvailable": true
+          }
+        ]
+      },
+      {
+        "id": "CcdFs0Psc0liqH_IFGI3H",
+        "title": "PASTAS",
+        "subtitle": "",
+        "footnote": "Served with toasted garlic bread.",
+        "items": [
+          {
+            "id": "fnrUICwuS9LQVWivqC-ez",
+            "name": "Mac & Cheese",
+            "description": "Cavatappi pasta, smothered in five cheese cream sauce, smoked bacon topped with toasted bread crumb. Add chicken $3.",
+            "price": "15.99",
+            "priceLabel": "Half $8.99",
+            "tags": [],
+            "isAvailable": true
+          },
+          {
+            "id": "7QnDFewlgCR1MUE6ralwX",
+            "name": "Wild Serrano Chicken",
+            "description": "Cavatappi pasta, marinated chicken, spicy serrano cream sauce, roasted corn relish, sweet pepper, tomatillo, cherry tomatoes, and cotija cheese.",
+            "price": "18.99",
+            "priceLabel": "Half $9.99",
+            "tags": [],
+            "isAvailable": true
+          }
+        ]
+      }
+    ],
+    "footer": "February 12, 2026"
+  },
+  "pageLayout": {
+    "pageSize": "letter",
+    "orientation": "portrait",
+    "margins": {
+      "top": 0.75,
+      "right": 0.75,
+      "bottom": 0.75,
+      "left": 0.75
+    },
+    "columnCount": 1,
+    "layoutDirection": "vertical",
+    "sectionLayouts": [],
+    "colorScheme": {
+      "background": "#FFFDF5",
+      "text": "#2C1810",
+      "accent": "#8B4513",
+      "border": "#D4C5A9"
+    },
+    "typography": {
+      "menuTitle": {
+        "fontFamily": "Georgia",
+        "fontSize": 28,
+        "fontWeight": 700,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "center",
+        "color": "#2C1810"
+      },
+      "menuSubtitle": {
+        "fontFamily": "Georgia",
+        "fontSize": 14,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "center",
+        "color": "#2C1810"
+      },
+      "sectionTitle": {
+        "fontFamily": "Georgia",
+        "fontSize": 18,
+        "fontWeight": 700,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "left",
+        "color": "#2C1810"
+      },
+      "sectionSubtitle": {
+        "fontFamily": "system-ui",
+        "fontSize": 12,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "left",
+        "color": "#2C1810"
+      },
+      "itemName": {
+        "fontFamily": "system-ui",
+        "fontSize": 12,
+        "fontWeight": 700,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "left",
+        "color": "#2C1810"
+      },
+      "itemDescription": {
+        "fontFamily": "system-ui",
+        "fontSize": 10,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "left",
+        "color": "#2C1810"
+      },
+      "itemPrice": {
+        "fontFamily": "system-ui",
+        "fontSize": 12,
+        "fontWeight": 700,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "right",
+        "color": "#2C1810"
+      },
+      "footer": {
+        "fontFamily": "system-ui",
+        "fontSize": 9,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "lineHeight": 1.5,
+        "textTransform": "none",
+        "textAlign": "center",
+        "color": "#2C1810"
+      }
+    },
+    "itemSeparator": "none",
+    "priceFormat": "right-aligned",
+    "sectionDecoration": "none",
+    "currency": "$",
+    "backgroundTexture": "none",
+    "sectionDivider": "none",
+    "pageBorder": "none",
+    "sectionGap": 16
+  },
+  "createdAt": "2026-02-19T05:01:50.757Z",
+  "updatedAt": "2026-02-19T05:01:50.765Z"
+}

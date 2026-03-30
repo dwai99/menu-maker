@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLayoutStore } from '@/stores/layout-store';
 import { useUIStore } from '@/stores/ui-store';
-import { getAllFontFamilies } from '@/fonts/registry';
+import { getFontsByCategory } from '@/fonts/registry';
 import { ColorInput } from './ColorInput';
 
 interface FontStyle {
@@ -38,13 +38,40 @@ export const TypographyControl: React.FC<TypographyControlProps> = ({
   fontStyle,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [fontFamilies, setFontFamilies] = useState<string[]>([]);
+  const [fontPickerOpen, setFontPickerOpen] = useState(false);
+  const [fontSearch, setFontSearch] = useState('');
+  const fontPickerRef = useRef<HTMLDivElement>(null);
+  const fontSearchRef = useRef<HTMLInputElement>(null);
   const { setTypography } = useLayoutStore();
   const { markDirty } = useUIStore();
 
+  const fontGroups = useMemo(() => getFontsByCategory(), []);
+
+  const filteredFontGroups = useMemo(() => {
+    if (!fontSearch.trim()) return fontGroups;
+    const query = fontSearch.toLowerCase();
+    const filtered = new Map<string, { family: string; category: string }[]>();
+    for (const [category, fonts] of fontGroups.entries()) {
+      const matches = fonts.filter(f => f.family.toLowerCase().includes(query));
+      if (matches.length > 0) filtered.set(category, matches);
+    }
+    return filtered;
+  }, [fontGroups, fontSearch]);
+
   useEffect(() => {
-    setFontFamilies(getAllFontFamilies());
-  }, []);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (fontPickerRef.current && !fontPickerRef.current.contains(event.target as Node)) {
+        setFontPickerOpen(false);
+        setFontSearch('');
+      }
+    };
+    if (fontPickerOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      // Focus search input when opening
+      setTimeout(() => fontSearchRef.current?.focus(), 0);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [fontPickerOpen]);
 
   const handleChange = (field: keyof FontStyle, value: any) => {
     setTypography(role, { [field]: value });
@@ -87,17 +114,63 @@ export const TypographyControl: React.FC<TypographyControlProps> = ({
           {/* Font Family */}
           <div className="grid grid-cols-[140px_1fr] gap-3 items-center">
             <label className="text-sm font-medium text-neutral-700">Font Family</label>
-            <select
-              value={fontStyle.fontFamily}
-              onChange={(e) => handleChange('fontFamily', e.target.value)}
-              className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-            >
-              {fontFamilies.map((font) => (
-                <option key={font} value={font} style={{ fontFamily: font }}>
-                  {font}
-                </option>
-              ))}
-            </select>
+            <div className="relative" ref={fontPickerRef}>
+              <button
+                type="button"
+                onClick={() => setFontPickerOpen(!fontPickerOpen)}
+                className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent bg-white text-left flex items-center justify-between"
+              >
+                <span style={{ fontFamily: fontStyle.fontFamily }} className="truncate">
+                  {fontStyle.fontFamily}
+                </span>
+                <svg className={`w-4 h-4 text-neutral-400 transition-transform flex-shrink-0 ${fontPickerOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {fontPickerOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white rounded-lg shadow-lg border border-neutral-200 max-h-72 flex flex-col">
+                  <div className="p-2 border-b border-neutral-100">
+                    <input
+                      ref={fontSearchRef}
+                      type="text"
+                      value={fontSearch}
+                      onChange={(e) => setFontSearch(e.target.value)}
+                      placeholder="Search fonts..."
+                      className="w-full px-2.5 py-1.5 text-sm border border-neutral-200 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div className="overflow-y-auto flex-1">
+                    {Array.from(filteredFontGroups.entries()).map(([category, fonts]) => (
+                      <div key={category}>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-neutral-400 uppercase tracking-wider bg-neutral-50 sticky top-0">
+                          {category}
+                        </div>
+                        {fonts.map((font) => (
+                          <button
+                            key={font.family}
+                            type="button"
+                            onClick={() => {
+                              handleChange('fontFamily', font.family);
+                              setFontPickerOpen(false);
+                              setFontSearch('');
+                            }}
+                            className={`w-full px-3 py-2 text-sm text-left hover:bg-amber-50 transition-colors ${
+                              fontStyle.fontFamily === font.family ? 'bg-amber-50 text-amber-800 font-medium' : 'text-neutral-700'
+                            }`}
+                            style={{ fontFamily: font.family }}
+                          >
+                            {font.family}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                    {filteredFontGroups.size === 0 && (
+                      <div className="px-3 py-4 text-sm text-neutral-400 text-center">No fonts found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Font Size */}
@@ -180,14 +253,14 @@ export const TypographyControl: React.FC<TypographyControlProps> = ({
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                min="-0.1"
-                max="0.5"
-                step="0.01"
+                min="-2"
+                max="10"
+                step="0.5"
                 value={fontStyle.letterSpacing}
                 onChange={(e) => handleChange('letterSpacing', parseFloat(e.target.value))}
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
               />
-              <span className="text-sm text-neutral-500 min-w-[24px]">em</span>
+              <span className="text-sm text-neutral-500 min-w-[24px]">px</span>
             </div>
           </div>
 

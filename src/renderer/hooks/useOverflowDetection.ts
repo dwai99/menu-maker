@@ -29,8 +29,10 @@ export function useOverflowDetection(): void {
     pageLayout.margins,
     pageLayout.typography,
     pageLayout.itemSeparator,
+    pageLayout.columnCount,
     pageLayout.sectionLayouts,
     pageLayout.variantDisplayMode,
+    pageLayout.sectionTitleDecoration,
     setOverflowState,
   ])
 }

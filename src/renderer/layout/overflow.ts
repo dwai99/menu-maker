@@ -7,6 +7,7 @@ import {
   estimateSectionHeight,
   estimatePartialSectionHeight,
   findSplitPoint,
+  HEIGHT_BUFFER,
 } from './measure'
 
 export interface OverflowState {
@@ -19,7 +20,6 @@ export interface OverflowState {
 }
 
 const DPI = 96
-const HEIGHT_BUFFER = 1.15
 
 /**
  * Detect whether the current menu content overflows the page.
@@ -51,8 +51,8 @@ export function detectOverflow(
   interface Frag { section: MenuSection; startIdx: number; endIdx?: number; h: number }
 
   const frags: Frag[] = sections.map((section) => {
-    const result = estimateSectionHeight(section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator, pageLayout.variantDisplayMode)
-    return { section, startIdx: 0, h: (result.estimatedHeight + 16) * HEIGHT_BUFFER }
+    const result = estimateSectionHeight(section, pageLayout.typography, colWidthPx, 1, pageLayout.itemSeparator, pageLayout.variantDisplayMode, pageLayout.sectionTitleDecoration)
+    return { section, startIdx: 0, h: (result.estimatedHeight + 4) * HEIGHT_BUFFER }
   })
   frags.sort((a, b) => b.h - a.h)
 
@@ -95,7 +95,7 @@ export function detectOverflow(
           frag.endIdx,
           pageLayout.variantDisplayMode,
         )
-        queue.push({ section: frag.section, startIdx: splitResult.splitIndex, endIdx: frag.endIdx, h: (remH + 16) * HEIGHT_BUFFER })
+        queue.push({ section: frag.section, startIdx: splitResult.splitIndex, endIdx: frag.endIdx, h: (remH + 4) * HEIGHT_BUFFER })
         queue.sort((a, b) => b.h - a.h)
       } else {
         watermarks[bestCol] += frag.h + vGapPx

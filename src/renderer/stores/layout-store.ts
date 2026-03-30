@@ -14,8 +14,9 @@ import {
   PriceFormat,
   createDefaultPageLayout,
 } from '../models/layout'
-import type { ColumnCount, LayoutDirection, SectionDecoration, Currency, BackgroundTexture, SectionDivider, PageBorder, Vertex, PageDefinition, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, TriFoldConfig, TriFoldPaperSize, TriFoldPanelRole, TriFoldType, PrintMarks, HeaderConfig } from '../models/layout'
+import type { ColumnCount, LayoutDirection, SectionDecoration, Currency, BackgroundTexture, SectionDivider, PageBorder, Vertex, PageDefinition, VariantDisplayMode, VariantSeparator, SectionTitleDecoration, TriFoldConfig, TriFoldPaperSize, TriFoldPanelRole, TriFoldType, PrintMarks, HeaderConfig, PricePosition } from '../models/layout'
 import { createDefaultHeaderConfig } from '../models/layout'
+import { parseFragmentId } from '../layout/layout-engine'
 
 interface LayoutStore {
   pageLayout: PageLayout
@@ -29,6 +30,7 @@ interface LayoutStore {
   setLayoutDirection: (dir: LayoutDirection) => void
   setItemSeparator: (sep: ItemSeparator) => void
   setPriceFormat: (format: PriceFormat) => void
+  setPricePosition: (position: PricePosition) => void
   setSectionDecoration: (dec: SectionDecoration) => void
   setCurrency: (currency: Currency) => void
   setBackgroundTexture: (texture: BackgroundTexture) => void
@@ -46,6 +48,10 @@ interface LayoutStore {
   removeSectionLayout: (sectionId: string) => void
   setSectionLayouts: (layouts: SectionLayout[]) => void
   clearAllSectionLayouts: () => void
+
+  // Fragment-aware section layout (matches on sectionId + startItemIndex)
+  setFragmentLayout: (fragmentId: string, layout: Partial<SectionLayout>) => void
+  removeFragmentLayout: (fragmentId: string) => void
 
   // Polygon vertex editing
   setPolygonVertex: (sectionId: string, vertexIndex: number, position: Vertex) => void
@@ -79,6 +85,9 @@ interface LayoutStore {
 
   // Header config
   setHeaderConfig: (config: Partial<HeaderConfig>) => void
+
+  // Batch update (single undo step)
+  applyBatchUpdate: (updates: Partial<PageLayout>) => void
 
   // Bulk
   loadPageLayout: (layout: PageLayout) => void
@@ -181,6 +190,12 @@ export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
   setPriceFormat: (format: PriceFormat) => {
     set((state) => ({
       pageLayout: { ...state.pageLayout, priceFormat: format },
+    }))
+  },
+
+  setPricePosition: (position: PricePosition) => {
+    set((state) => ({
+      pageLayout: { ...state.pageLayout, pricePosition: position },
     }))
   },
 
@@ -305,6 +320,54 @@ export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
       pageLayout: {
         ...state.pageLayout,
         sectionLayouts: [],
+      },
+    }))
+  },
+
+  setFragmentLayout: (fragmentId: string, layout: Partial<SectionLayout>) => {
+    const { sectionId, startItemIndex } = parseFragmentId(fragmentId)
+    set((state) => {
+      const existing = state.pageLayout.sectionLayouts.find(
+        (sl) => sl.sectionId === sectionId && (sl.startItemIndex ?? 0) === startItemIndex
+      )
+      if (existing) {
+        return {
+          pageLayout: {
+            ...state.pageLayout,
+            sectionLayouts: state.pageLayout.sectionLayouts.map((sl) =>
+              sl.sectionId === sectionId && (sl.startItemIndex ?? 0) === startItemIndex
+                ? { ...sl, ...layout }
+                : sl
+            ),
+          },
+        }
+      }
+      // Create new fragment layout
+      const newLayout: SectionLayout = {
+        sectionId,
+        polygon: [[0, 0], [100, 0], [100, 100], [0, 100]],
+        columnCount: 1,
+        pageIndex: 0,
+        startItemIndex: startItemIndex > 0 ? startItemIndex : undefined,
+        ...layout,
+      }
+      return {
+        pageLayout: {
+          ...state.pageLayout,
+          sectionLayouts: [...state.pageLayout.sectionLayouts, newLayout],
+        },
+      }
+    })
+  },
+
+  removeFragmentLayout: (fragmentId: string) => {
+    const { sectionId, startItemIndex } = parseFragmentId(fragmentId)
+    set((state) => ({
+      pageLayout: {
+        ...state.pageLayout,
+        sectionLayouts: state.pageLayout.sectionLayouts.filter(
+          (sl) => !(sl.sectionId === sectionId && (sl.startItemIndex ?? 0) === startItemIndex)
+        ),
       },
     }))
   },
@@ -604,6 +667,52 @@ export const useLayoutStore = create<LayoutStore>()(temporal((set) => ({
           headerConfig: { ...existing, ...config },
         },
       }
+    })
+  },
+
+  applyBatchUpdate: (updates: Partial<PageLayout>) => {
+    set((state) => {
+      let merged = { ...state.pageLayout, ...updates }
+
+      // Deep-merge typography if provided
+      if (updates.typography) {
+        const t = { ...state.pageLayout.typography }
+        for (const role of Object.keys(updates.typography) as (keyof TypographyConfig)[]) {
+          t[role] = { ...t[role], ...updates.typography[role] }
+        }
+        merged.typography = t
+      }
+
+      // Cascade color scheme changes into typography (same logic as setColorScheme)
+      if (updates.colorScheme) {
+        const oldScheme = state.pageLayout.colorScheme
+        const newScheme = { ...oldScheme, ...updates.colorScheme }
+        merged.colorScheme = newScheme
+
+        const colorMap: Array<{ oldColor: string; newColor: string }> = []
+        if (updates.colorScheme.text && updates.colorScheme.text !== oldScheme.text) {
+          colorMap.push({ oldColor: oldScheme.text, newColor: updates.colorScheme.text })
+        }
+        if (updates.colorScheme.accent && updates.colorScheme.accent !== oldScheme.accent) {
+          colorMap.push({ oldColor: oldScheme.accent, newColor: updates.colorScheme.accent })
+        }
+
+        if (colorMap.length > 0) {
+          const updated = { ...merged.typography }
+          for (const role of Object.keys(updated) as (keyof TypographyConfig)[]) {
+            const fontStyle = updated[role]
+            for (const { oldColor, newColor } of colorMap) {
+              if (fontStyle.color.toLowerCase() === oldColor.toLowerCase()) {
+                updated[role] = { ...fontStyle, color: newColor }
+                break
+              }
+            }
+          }
+          merged.typography = updated
+        }
+      }
+
+      return { pageLayout: merged }
     })
   },
 

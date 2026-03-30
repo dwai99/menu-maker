@@ -13,7 +13,7 @@ describe('Layout Store', () => {
         const { pageLayout } = useLayoutStore.getState()
         expect(pageLayout.pageSize).toBe('letter')
         expect(pageLayout.orientation).toBe('portrait')
-        expect(pageLayout.margins.top).toBe(0.75)
+        expect(pageLayout.margins.top).toBe(0.25)
     })
 
     it('should set page size', () => {

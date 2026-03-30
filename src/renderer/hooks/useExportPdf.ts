@@ -123,7 +123,7 @@ export const useExportPdf = () => {
         document.body.appendChild(overlay)
       }
 
-      // Inject print styles for multi-page support
+      // Inject print styles for multi-page support + hide editor-only elements
       const styleEl = document.createElement('style');
       styleEl.id = 'pdf-export-styles';
       styleEl.textContent = `
@@ -137,6 +137,7 @@ export const useExportPdf = () => {
             break-after: avoid;
           }
         }
+        [data-editor-only] { display: none !important; }
       `;
       document.head.appendChild(styleEl);
 

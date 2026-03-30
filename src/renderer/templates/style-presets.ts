@@ -10,6 +10,44 @@ export interface StylePreset {
 }
 
 export const stylePresets: StylePreset[] = [
+  // 0. Black & White
+  {
+    id: 'black-white',
+    name: 'Black & White',
+    description: 'Clean black and white — no color ink needed',
+    colorScheme: {
+      background: '#FFFFFF',
+      text: '#000000',
+      accent: '#000000',
+      border: '#000000',
+    },
+    typography: {
+      menuTitle: createDefaultFontStyle({
+        fontFamily: 'Georgia',
+        fontSize: 28,
+        fontWeight: 700,
+        color: '',
+        textAlign: 'center',
+      }),
+      menuSubtitle: createDefaultFontStyle({
+        fontFamily: 'Georgia',
+        fontSize: 14,
+        color: '',
+        textAlign: 'center',
+      }),
+      sectionTitle: createDefaultFontStyle({
+        fontFamily: 'Georgia',
+        fontSize: 18,
+        fontWeight: 700,
+        color: '',
+      }),
+      sectionSubtitle: createDefaultFontStyle({ fontSize: 12, color: '' }),
+      itemName: createDefaultFontStyle({ fontSize: 12, fontWeight: 700, color: '' }),
+      itemDescription: createDefaultFontStyle({ fontSize: 10, color: '' }),
+      itemPrice: createDefaultFontStyle({ fontSize: 12, fontWeight: 700, textAlign: 'right', color: '' }),
+      footer: createDefaultFontStyle({ fontSize: 9, textAlign: 'center', color: '' }),
+    },
+  },
   // 1. Classic Elegance
   {
     id: 'classic-elegance',

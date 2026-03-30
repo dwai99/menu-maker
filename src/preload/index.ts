@@ -21,12 +21,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // PDF import/export
   parsePdf: (filePath: string) =>
     ipcRenderer.invoke('import:parse-pdf', filePath) as Promise<{ success: boolean; text?: string; numPages?: number; error?: string }>,
+  ocrImage: (filePath: string) =>
+    ipcRenderer.invoke('import:ocr-image', filePath) as Promise<{ success: boolean; text?: string; menuData?: any; error?: string }>,
+  onOcrProgress: (callback: (data: { progress: number; message: string }) => void) => {
+    const handler = (_event: any, data: { progress: number; message: string }) => callback(data)
+    ipcRenderer.on('ocr:progress', handler)
+    return () => ipcRenderer.removeListener('ocr:progress', handler)
+  },
   exportPdf: (options: { pageWidth: number; pageHeight: number }) =>
     ipcRenderer.invoke('export:pdf', options),
   exportImage: (options: { pageWidth: number; pageHeight: number; format: 'png' | 'jpeg' }) =>
     ipcRenderer.invoke('export:image', options),
   saveImageData: (options: { dataUrl: string; format: 'png' | 'jpeg'; defaultName: string }) =>
     ipcRenderer.invoke('save-image-data', options),
+  showSaveDirectoryDialog: () =>
+    ipcRenderer.invoke('dialog:save-directory') as Promise<{ canceled: boolean; directoryPath?: string }>,
+  saveImageToPath: (options: { dataUrl: string; filePath: string }) =>
+    ipcRenderer.invoke('save-image-to-path', options) as Promise<{ success: boolean; error?: string }>,
   printPage: () =>
     ipcRenderer.invoke('print:page'),
 
@@ -96,6 +107,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu:open-recent', handler)
     return () => ipcRenderer.removeListener('menu:open-recent', handler)
   },
+
+  // AI layout suggestion
+  aiSuggestLayout: (contentSummary: string) =>
+    ipcRenderer.invoke('ai:suggest-layout', contentSummary) as Promise<{
+      success: boolean
+      suggestion?: { columnCount: number; layoutDirection: string; orientation: string; fontScale: number; reasoning: string }
+      error?: string
+    }>,
 
   // Settings
   getSetting: (key: string) => ipcRenderer.invoke('settings:get', key),

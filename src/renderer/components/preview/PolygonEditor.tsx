@@ -6,7 +6,7 @@ import type { BoundingBox } from '@/layout/polygon'
 import { rectToPolygon } from '@/layout/polygon'
 
 interface PolygonEditorProps {
-  sectionId: string
+  fragmentId: string
   polygon: Vertex[]
   contentWidthPx: number
   contentHeightPx: number
@@ -23,7 +23,7 @@ interface PolygonEditorProps {
  * Constrains to right angles and snaps to column grid boundaries.
  */
 export const PolygonEditor: React.FC<PolygonEditorProps> = ({
-  sectionId,
+  fragmentId,
   polygon,
   contentWidthPx,
   contentHeightPx,
@@ -32,7 +32,7 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
   columnGridLines,
   onResizeEnd,
 }) => {
-  const setSectionLayout = useLayoutStore((s) => s.setSectionLayout)
+  const setFragmentLayout = useLayoutStore((s) => s.setFragmentLayout)
   const markDirty = useUIStore((s) => s.markDirty)
 
   // Snap a percentage x value to the nearest column grid line
@@ -63,8 +63,10 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
       const startX = e.clientX
       const startY = e.clientY
       const startBbox = { ...bbox }
+      let didMove = false
 
       const handleMouseMove = (moveE: MouseEvent) => {
+        didMove = true
         const dx = ((moveE.clientX - startX) / (contentWidthPx * zoom)) * 100
         const dy = ((moveE.clientY - startY) / (contentHeightPx * zoom)) * 100
 
@@ -81,20 +83,22 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
         }
 
         const newPolygon = rectToPolygon(startBbox.x, startBbox.y, newWidth, newHeight)
-        setSectionLayout(sectionId, { polygon: newPolygon })
+        setFragmentLayout(fragmentId, { polygon: newPolygon })
         markDirty()
       }
 
       const handleMouseUp = () => {
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
-        onResizeEnd?.()
+        if (didMove) {
+          onResizeEnd?.()
+        }
       }
 
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [bbox, sectionId, contentWidthPx, contentHeightPx, zoom, snapToGrid, setSectionLayout, markDirty, onResizeEnd]
+    [bbox, fragmentId, contentWidthPx, contentHeightPx, zoom, snapToGrid, setFragmentLayout, markDirty, onResizeEnd]
   )
 
   // Handle left-edge resize (move x, adjust width)
@@ -105,28 +109,32 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
 
       const startX = e.clientX
       const startBbox = { ...bbox }
+      let didMove = false
 
       const handleMouseMove = (moveE: MouseEvent) => {
+        didMove = true
         const dx = ((moveE.clientX - startX) / (contentWidthPx * zoom)) * 100
         const rawX = startBbox.x + dx
         const newX = snapToGrid(rawX)
         const newWidth = Math.max(10, startBbox.x + startBbox.width - newX)
 
         const newPolygon = rectToPolygon(newX, startBbox.y, newWidth, startBbox.height)
-        setSectionLayout(sectionId, { polygon: newPolygon })
+        setFragmentLayout(fragmentId, { polygon: newPolygon })
         markDirty()
       }
 
       const handleMouseUp = () => {
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
-        onResizeEnd?.()
+        if (didMove) {
+          onResizeEnd?.()
+        }
       }
 
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [bbox, sectionId, contentWidthPx, zoom, snapToGrid, setSectionLayout, markDirty, onResizeEnd]
+    [bbox, fragmentId, contentWidthPx, zoom, snapToGrid, setFragmentLayout, markDirty, onResizeEnd]
   )
 
   // Handle top-edge resize (move y, adjust height — bottom stays fixed)
@@ -138,8 +146,10 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
       const startY = e.clientY
       const startBbox = { ...bbox }
       const bottomEdge = startBbox.y + startBbox.height
+      let didMove = false
 
       const handleMouseMove = (moveE: MouseEvent) => {
+        didMove = true
         const dy = ((moveE.clientY - startY) / (contentHeightPx * zoom)) * 100
         const newY = startBbox.y + dy
         const newHeight = bottomEdge - newY
@@ -147,20 +157,22 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
         const clampedY = bottomEdge - clampedHeight
 
         const newPolygon = rectToPolygon(startBbox.x, clampedY, startBbox.width, clampedHeight)
-        setSectionLayout(sectionId, { polygon: newPolygon })
+        setFragmentLayout(fragmentId, { polygon: newPolygon })
         markDirty()
       }
 
       const handleMouseUp = () => {
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
-        onResizeEnd?.()
+        if (didMove) {
+          onResizeEnd?.()
+        }
       }
 
       document.addEventListener('mousemove', handleMouseMove)
       document.addEventListener('mouseup', handleMouseUp)
     },
-    [bbox, sectionId, contentHeightPx, zoom, setSectionLayout, markDirty, onResizeEnd]
+    [bbox, fragmentId, contentHeightPx, zoom, setFragmentLayout, markDirty, onResizeEnd]
   )
 
   const handleStyle: React.CSSProperties = {

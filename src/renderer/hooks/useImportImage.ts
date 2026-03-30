@@ -1,15 +1,16 @@
 import { useEffect } from 'react'
-import { createWorker } from 'tesseract.js'
+import { nanoid } from 'nanoid'
 import { useMenuStore } from '@/stores/menu-store'
 import { useUIStore } from '@/stores/ui-store'
 import { parseMenuText } from '@/utils/parse-menu-text'
+import type { MenuData, MenuSection, MenuItem } from '@/models/menu'
 
 /**
  * Hook for importing image files (PNG, JPG, HEIC, WEBP) and parsing them
- * into menu data via Tesseract.js OCR.
+ * into menu data. Uses Claude Vision API when an API key is configured
+ * (much better quality), falls back to Tesseract.js OCR locally.
  *
- * Progress state is stored in ui-store so AppShell can display a toast
- * without prop drilling.
+ * Progress state is stored in ui-store so AppShell can display a toast.
  */
 export function useImportImage() {
   const loadMenuData = useMenuStore((state) => state.loadMenuData)
@@ -17,101 +18,65 @@ export function useImportImage() {
   const setOcrProgress = useUIStore((state) => state.setOcrProgress)
   const ocrProgress = useUIStore((state) => state.ocrProgress)
 
+  // Listen for OCR progress updates from main process
+  useEffect(() => {
+    if (!window.electronAPI?.onOcrProgress) return
+    const cleanup = window.electronAPI.onOcrProgress((data) => {
+      setOcrProgress({ active: true, progress: data.progress, message: data.message })
+    })
+    return cleanup
+  }, [setOcrProgress])
+
   const importImage = async (): Promise<void> => {
     if (!window.electronAPI) return
     try {
-      // Show file open dialog for image files
       const { canceled, filePaths } = await window.electronAPI.showOpenImportImageDialog()
+      if (canceled || !filePaths || filePaths.length === 0) return
 
-      if (canceled || !filePaths || filePaths.length === 0) {
+      const filePath = filePaths[0]
+      setOcrProgress({ active: true, progress: 0, message: 'Reading image...' })
+
+      const result = await window.electronAPI.ocrImage(filePath)
+
+      if (!result.success) {
+        throw new Error(result.error || 'Import failed')
+      }
+
+      // Claude Vision returns structured menuData directly
+      if (result.menuData) {
+        const menuData = normalizeMenuData(result.menuData)
+        const totalItems = menuData.sections.reduce((sum, s) => sum + s.items.length, 0)
+        if (totalItems === 0) {
+          throw new Error('Could not extract any menu items from the image.')
+        }
+        loadMenuData(menuData)
+        markDirty()
+        setOcrProgress({ active: true, progress: 100, message: 'Done!' })
+        console.log(`Imported via AI: ${menuData.sections.length} sections, ${totalItems} items`)
         return
       }
 
-      const filePath = filePaths[0]
-
-      setOcrProgress({ active: true, progress: 0, message: 'Reading image...' })
-
-      // Read file as base64
-      const readResult = await window.electronAPI.readBinary(filePath)
-
-      if (!readResult.success || !readResult.data) {
-        throw new Error(readResult.error || 'Failed to read image file')
+      // Tesseract fallback returns raw text
+      if (!result.text || result.text.trim().length === 0) {
+        throw new Error('No text found in image. Make sure the image contains readable menu text.')
       }
 
-      // Determine MIME type from file extension
-      const ext = filePath.split('.').pop()?.toLowerCase() ?? 'png'
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg',
-        jpeg: 'image/jpeg',
-        png: 'image/png',
-        webp: 'image/webp',
-        heic: 'image/heic',
-        pdf: 'application/pdf',
+      setOcrProgress({ active: true, progress: 95, message: 'Parsing menu...' })
+      const menuData = parseMenuText(result.text)
+      const totalItems = menuData.sections.reduce((sum, s) => sum + s.items.length, 0)
+      if (totalItems === 0) {
+        throw new Error('Could not extract any menu items from the image.')
       }
-      const mime = mimeMap[ext] ?? 'image/png'
-      const dataUrl = `data:${mime};base64,${readResult.data}`
 
-      setOcrProgress({ active: true, progress: 10, message: 'Starting OCR...' })
-
-      // Create Tesseract worker with progress tracking
-      const worker = await createWorker('eng', 1, {
-        logger: (info: { status: string; progress: number }) => {
-          if (info.status === 'recognizing text') {
-            const pct = Math.round(10 + info.progress * 85)
-            setOcrProgress({
-              active: true,
-              progress: pct,
-              message: `Recognizing text... ${Math.round(info.progress * 100)}%`,
-            })
-          }
-        },
-      })
-
-      try {
-        const { data } = await worker.recognize(dataUrl)
-        const recognizedText = data.text
-
-        setOcrProgress({ active: true, progress: 95, message: 'Parsing menu...' })
-
-        if (!recognizedText || recognizedText.trim().length === 0) {
-          throw new Error(
-            'No text found in image. Make sure the image contains readable menu text.'
-          )
-        }
-
-        // Parse OCR text into menu data
-        const menuData = parseMenuText(recognizedText)
-
-        const totalItems = menuData.sections.reduce(
-          (sum, section) => sum + section.items.length,
-          0
-        )
-
-        if (totalItems === 0) {
-          throw new Error(
-            'Could not extract any menu items from the image. The image may not contain recognizable menu content.'
-          )
-        }
-
-        // Load parsed data into the menu store
-        loadMenuData(menuData)
-        markDirty()
-
-        setOcrProgress({ active: true, progress: 100, message: 'Done!' })
-
-        console.log(
-          `Imported image via OCR: ${menuData.sections.length} sections, ${totalItems} items`
-        )
-      } finally {
-        await worker.terminate()
-      }
+      loadMenuData(menuData)
+      markDirty()
+      setOcrProgress({ active: true, progress: 100, message: 'Done!' })
+      console.log(`Imported via OCR: ${menuData.sections.length} sections, ${totalItems} items`)
     } catch (error) {
       console.error('Image import error:', error)
-      const message =
-        error instanceof Error ? error.message : 'Unknown error occurred'
+      const message = error instanceof Error ? error.message : 'Unknown error occurred'
       alert(`Failed to import image: ${message}`)
     } finally {
-      // Small delay so the "Done!" message is briefly visible before dismissal
       setTimeout(() => {
         setOcrProgress({ active: false, progress: 0, message: '' })
       }, 1200)
@@ -134,5 +99,34 @@ export function useImportImage() {
     isProcessing: ocrProgress.active,
     progress: ocrProgress.progress,
     progressMessage: ocrProgress.message,
+  }
+}
+
+/**
+ * Normalize Claude's JSON response into a proper MenuData with IDs.
+ * Claude returns the right shape but without nanoid IDs.
+ */
+function normalizeMenuData(raw: any): MenuData {
+  const sections: MenuSection[] = (raw.sections || []).map((s: any) => ({
+    id: nanoid(),
+    title: s.title || '',
+    subtitle: s.subtitle || '',
+    footnote: s.footnote || '',
+    items: (s.items || []).map((item: any): MenuItem => ({
+      id: nanoid(),
+      name: item.name || '',
+      description: item.description || '',
+      price: item.price || '',
+      priceLabel: item.priceLabel || '',
+      tags: item.tags || [],
+      isAvailable: true,
+    })),
+  }))
+
+  return {
+    title: raw.title || '',
+    subtitle: raw.subtitle || '',
+    sections,
+    footer: raw.footer || '',
   }
 }

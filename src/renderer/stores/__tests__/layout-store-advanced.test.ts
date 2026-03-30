@@ -19,7 +19,7 @@ describe('Layout Store - Advanced Operations', () => {
             const scheme = useLayoutStore.getState().pageLayout.colorScheme
             expect(scheme.accent).toBe('#ff0000')
             // Other colors should remain
-            expect(scheme.background).toBe('#FFFDF5')
+            expect(scheme.background).toBe('#FFFFFF')
         })
 
         it('should override multiple colors', () => {
@@ -248,6 +248,60 @@ describe('Layout Store - Advanced Operations', () => {
             for (const page of pages) {
                 expect(page.sectionIds).not.toContain('sec-x')
             }
+        })
+    })
+
+    // ── Fragment-Aware Section Layout ──────────────────────────
+    describe('Fragment Layout', () => {
+        it('setFragmentLayout should update only the matching fragment', () => {
+            // Create two fragments for the same section (split)
+            const layouts = [
+                { sectionId: 'sec-1', polygon: [[0, 0], [50, 0], [50, 50], [0, 50]] as [number, number][], columnCount: 1 as const, pageIndex: 0, endItemIndex: 5 },
+                { sectionId: 'sec-1', polygon: [[0, 50], [50, 50], [50, 100], [0, 100]] as [number, number][], columnCount: 1 as const, pageIndex: 0, startItemIndex: 5 },
+                { sectionId: 'sec-2', polygon: [[50, 0], [100, 0], [100, 100], [50, 100]] as [number, number][], columnCount: 1 as const, pageIndex: 0 },
+            ]
+            act(() => useLayoutStore.getState().setSectionLayouts(layouts))
+
+            // Update only the second fragment (startItemIndex=5)
+            const newPolygon: [number, number][] = [[10, 60], [60, 60], [60, 90], [10, 90]]
+            act(() => useLayoutStore.getState().setFragmentLayout('sec-1:5', { polygon: newPolygon }))
+
+            const updated = useLayoutStore.getState().pageLayout.sectionLayouts
+            expect(updated).toHaveLength(3)
+
+            // First fragment should be unchanged
+            expect(updated[0].polygon).toEqual([[0, 0], [50, 0], [50, 50], [0, 50]])
+            expect(updated[0].endItemIndex).toBe(5)
+
+            // Second fragment (the target) should have the new polygon
+            expect(updated[1].polygon).toEqual(newPolygon)
+            expect(updated[1].startItemIndex).toBe(5)
+
+            // sec-2 should be unchanged
+            expect(updated[2].sectionId).toBe('sec-2')
+        })
+
+        it('setFragmentLayout should create a new layout when not found', () => {
+            act(() => useLayoutStore.getState().setFragmentLayout('new-sec:0', { columnCount: 2 }))
+            const layouts = useLayoutStore.getState().pageLayout.sectionLayouts
+            expect(layouts).toHaveLength(1)
+            expect(layouts[0].sectionId).toBe('new-sec')
+            expect(layouts[0].columnCount).toBe(2)
+        })
+
+        it('removeFragmentLayout should remove only the matching fragment', () => {
+            const layouts = [
+                { sectionId: 'sec-1', polygon: [[0, 0], [50, 0], [50, 50], [0, 50]] as [number, number][], columnCount: 1 as const, pageIndex: 0, endItemIndex: 5 },
+                { sectionId: 'sec-1', polygon: [[0, 50], [50, 50], [50, 100], [0, 100]] as [number, number][], columnCount: 1 as const, pageIndex: 0, startItemIndex: 5 },
+            ]
+            act(() => useLayoutStore.getState().setSectionLayouts(layouts))
+
+            act(() => useLayoutStore.getState().removeFragmentLayout('sec-1:5'))
+
+            const remaining = useLayoutStore.getState().pageLayout.sectionLayouts
+            expect(remaining).toHaveLength(1)
+            expect(remaining[0].sectionId).toBe('sec-1')
+            expect(remaining[0].startItemIndex).toBeUndefined()
         })
     })
 

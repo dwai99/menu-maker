@@ -1,5 +1,25 @@
-import type { FontStyle, TypographyConfig, ItemSeparator, ColumnCount, VariantDisplayMode } from '../models/layout'
+import type { FontStyle, TypographyConfig, ItemSeparator, ColumnCount, VariantDisplayMode, SectionTitleDecoration } from '../models/layout'
 import type { MenuData, MenuSection, PriceVariant } from '../models/menu'
+
+/** Shared safety margin on height estimates — used by treemap, auto-layout, overflow */
+export const HEIGHT_BUFFER = 1.05
+
+/** Estimate pixel height contributed by a section title decoration */
+function titleDecorationHeight(decoration?: SectionTitleDecoration): number {
+  if (!decoration || decoration === 'none') return 0
+  switch (decoration) {
+    case 'underline-solid':
+      return 5 // 4px marginTop + 1px
+    case 'underline-double':
+      return 9 // 4px marginTop + 1px + 3px gap + 1px
+    case 'ornamental-flourish':
+    case 'ornamental-lines':
+    case 'ornamental-diamond':
+      return 18 // 4px marginTop + ~14px text line
+    default:
+      return 0
+  }
+}
 
 const PT_TO_PX = 96 / 72
 
@@ -35,6 +55,11 @@ export function estimateLineCount(text: string, style: FontStyle, containerWidth
 /** Separator height: 17px (8px margin top + 1px + 8px margin bottom) when present */
 const SEPARATOR_HEIGHT = 17
 
+/** Item margin-bottom matches PagePreview: Math.max(4, Math.round(fontSize * 0.65)) */
+function itemGap(typography: TypographyConfig): number {
+  return Math.max(4, Math.round(typography.itemName.fontSize * 0.65))
+}
+
 export interface SectionHeightResult {
   sectionId: string
   estimatedHeight: number
@@ -44,6 +69,12 @@ export interface SectionHeightResult {
 /**
  * Estimate the rendered height of a menu section in pixels.
  * Mirrors the exact padding/margin values from PagePreview.tsx.
+ *
+ * Rendered values (PagePreview.tsx):
+ *   header: padding '6px 10px' → 12px vertical
+ *   items container: padding '10px 12px' → 20px vertical, 24px horizontal
+ *   item marginBottom: Math.max(4, Math.round(fontSize * 0.65))
+ *   description marginTop: 2px
  */
 export function estimateSectionHeight(
   section: MenuSection,
@@ -52,16 +83,18 @@ export function estimateSectionHeight(
   columnCount: ColumnCount,
   itemSeparator: ItemSeparator,
   variantDisplayMode?: VariantDisplayMode,
+  sectionTitleDeco?: SectionTitleDecoration,
 ): SectionHeightResult {
-  // Section header: 8px padding-top + 12px padding-left/right (but height is vertical only)
-  // padding: '8px 12px' → 8px top + 8px bottom = 16px vertical padding
-  let headerHeight = 16 // padding top + bottom
+  // Section header: padding '6px 10px' → 6px top + 6px bottom = 12px vertical
+  let headerHeight = 12
 
   if (section.title) {
     headerHeight += textLineHeight(typography.sectionTitle)
     if (section.subtitle || section.footnote) {
       headerHeight += 4 // marginBottom on title when subtitle/footnote exists
     }
+    // Section title decoration (underline, flourish, etc.)
+    headerHeight += titleDecorationHeight(sectionTitleDeco)
   }
   if (section.subtitle) {
     headerHeight += textLineHeight(typography.sectionSubtitle)
@@ -71,15 +104,16 @@ export function estimateSectionHeight(
   }
   headerHeight += 1 // borderBottom
 
-  // Items container: padding '16px' → 16px top + 16px bottom = 32px
-  const itemsPadding = 32
+  // Items container: padding '10px 12px' → 10px top + 10px bottom = 20px vertical
+  const itemsPadding = 20
   const gap = columnCount <= 2 ? 24 : 16
   const itemContainerWidth = columnCount > 1
-    ? (containerWidthPx - 32 - (columnCount - 1) * gap) / columnCount
-    : containerWidthPx - 32 // 16px padding each side
+    ? (containerWidthPx - 24 - (columnCount - 1) * gap) / columnCount
+    : containerWidthPx - 24 // 12px padding each side
 
   let totalItemsHeight = 0
-  const items = section.items || []
+  const items = (section.items || []).filter((item: any) => item.isAvailable !== false)
+  const marginBottom = itemGap(typography)
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
@@ -91,7 +125,7 @@ export function estimateSectionHeight(
 
     // Description
     if (item.description) {
-      itemHeight += 4 // marginTop on description
+      itemHeight += 2 // marginTop on description (actual render uses 2px)
       const descLines = estimateLineCount(item.description, typography.itemDescription, itemContainerWidth)
       itemHeight += descLines * textLineHeight(typography.itemDescription)
     }
@@ -107,8 +141,8 @@ export function estimateSectionHeight(
       itemHeight += 4 + 20 // marginTop + approximate tag height
     }
 
-    // Bottom margin
-    itemHeight += 12 // marginBottom on item container
+    // Bottom margin (font-size-proportional, matching PagePreview)
+    itemHeight += marginBottom
 
     // Separator
     if (itemSeparator !== 'none') {
@@ -151,14 +185,14 @@ function measureSingleItemHeight(
     h += item.variants.filter((v) => v.price).length * textLineHeight(typography.itemPrice)
   }
   if (item.description) {
-    h += 4
+    h += 2 // marginTop (actual render uses 2px)
     const descLines = estimateLineCount(item.description, typography.itemDescription, itemContainerWidth)
     h += descLines * textLineHeight(typography.itemDescription)
   }
   if (item.tags && item.tags.length > 0) {
     h += 4 + 20
   }
-  h += 12 // marginBottom
+  h += itemGap(typography) // marginBottom (font-size-proportional)
   if (itemSeparator !== 'none') {
     h += SEPARATOR_HEIGHT
   }
@@ -170,7 +204,7 @@ function measureSectionHeaderHeight(
   section: MenuSection,
   typography: TypographyConfig,
 ): number {
-  let h = 16 // padding top + bottom
+  let h = 12 // padding '6px 10px' → 12px vertical
   if (section.title) {
     h += textLineHeight(typography.sectionTitle)
     if (section.subtitle || section.footnote) h += 4
@@ -200,7 +234,7 @@ export function findSplitPoint(
   variantDisplayMode?: VariantDisplayMode,
 ): { splitIndex: number; usedHeight: number } {
   const items = section.items || []
-  const itemContainerWidth = containerWidthPx - 32
+  const itemContainerWidth = containerWidthPx - 24 // 12px padding each side
 
   let usedHeight = 0
 
@@ -209,22 +243,22 @@ export function findSplitPoint(
     usedHeight += measureSectionHeaderHeight(section, typography)
   }
 
-  // Items container top padding
-  usedHeight += 16
+  // Items container top padding (10px)
+  usedHeight += 10
 
   for (let i = startItemIndex; i < items.length; i++) {
     const itemH = measureSingleItemHeight(items[i], typography, itemContainerWidth, itemSeparator, variantDisplayMode)
 
     // Check if adding this item would exceed available height
     // (always include at least 1 item to avoid infinite loops)
-    if (usedHeight + itemH + 16 > availableHeightPx && i > startItemIndex) {
-      return { splitIndex: i, usedHeight: usedHeight + 16 } // +16 for bottom padding
+    if (usedHeight + itemH + 10 > availableHeightPx && i > startItemIndex) {
+      return { splitIndex: i, usedHeight: usedHeight + 10 } // +10 for bottom padding
     }
     usedHeight += itemH
   }
 
   // Everything fits — add bottom padding
-  usedHeight += 16 // bottom padding
+  usedHeight += 10 // bottom padding
 
   return { splitIndex: items.length, usedHeight }
 }
@@ -244,7 +278,7 @@ export function estimatePartialSectionHeight(
 ): number {
   const items = section.items || []
   const end = endItemIndex ?? items.length
-  const itemContainerWidth = containerWidthPx - 32
+  const itemContainerWidth = containerWidthPx - 24 // 12px padding each side
 
   let height = 0
 
@@ -253,8 +287,8 @@ export function estimatePartialSectionHeight(
     height += measureSectionHeaderHeight(section, typography)
   }
 
-  // Items container padding (top + bottom)
-  height += 32
+  // Items container padding (top + bottom): 10px + 10px = 20px
+  height += 20
 
   for (let i = startItemIndex; i < end; i++) {
     height += measureSingleItemHeight(items[i], typography, itemContainerWidth, itemSeparator, variantDisplayMode)

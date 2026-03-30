@@ -22,10 +22,17 @@ export function useProjectManager() {
   const initRef = useRef(false)
 
   const serializeProject = useCallback((): string => {
+    // Save current layout back into the active view before serializing
+    useUIStore.getState().syncActiveViewLayout()
+    const { layoutViews } = useUIStore.getState()
+    const currentMenuData = useMenuStore.getState().menuData
+    const currentLayout = useLayoutStore.getState().pageLayout
+
     const project: MenuProject = {
       version: 3,
-      menuData: menuStore.menuData,
-      pageLayout: layoutStore.pageLayout,
+      menuData: currentMenuData,
+      pageLayout: currentLayout,
+      ...(layoutViews.length > 0 ? { layoutViews } : {}),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -34,12 +41,19 @@ export function useProjectManager() {
 
   /** Snapshot the current tab's state into its document tab record */
   const snapshotCurrentTab = useCallback(() => {
-    const { activeDocumentId, updateDocumentTab, isDirty, currentFilePath } = useUIStore.getState()
+    const { activeDocumentId, updateDocumentTab, isDirty, currentFilePath, layoutViews, activeLayoutViewId } = useUIStore.getState()
     if (!activeDocumentId) return
     const { menuData } = useMenuStore.getState()
     const { pageLayout } = useLayoutStore.getState()
+    // Save current layout back into the active view
+    let views = layoutViews
+    if (activeLayoutViewId && layoutViews.length > 0) {
+      views = layoutViews.map(v =>
+        v.id === activeLayoutViewId ? { ...v, pageLayout } : v
+      )
+    }
     updateDocumentTab(activeDocumentId, {
-      snapshot: { menuData, pageLayout },
+      snapshot: { menuData, pageLayout, layoutViews: views, activeLayoutViewId },
       isDirty,
       filePath: currentFilePath,
       name: fileDisplayName(currentFilePath),
@@ -51,13 +65,20 @@ export function useProjectManager() {
     const raw = JSON.parse(projectJson)
     const project = migrateProject(raw)
     const name = fileDisplayName(filePath)
-    const { documentTabs, activeDocumentId, addDocumentTab, updateDocumentTab } = useUIStore.getState()
+    const { documentTabs, activeDocumentId, addDocumentTab, updateDocumentTab, setLayoutViews, setActiveLayoutViewId } = useUIStore.getState()
+
+    // Load layout views from the project
+    const views = project.layoutViews ?? []
+    const activeViewId = views.length > 0 ? views[0].id : null
+    const effectiveLayout = activeViewId ? views[0].pageLayout : project.pageLayout
 
     // If current tab is untitled and clean, replace it instead of adding a new tab
     const currentTab = documentTabs.find((t) => t.id === activeDocumentId)
     if (currentTab && !currentTab.isDirty && !currentTab.filePath) {
       menuStore.loadMenuData(project.menuData)
-      layoutStore.loadPageLayout(project.pageLayout)
+      layoutStore.loadPageLayout(effectiveLayout)
+      setLayoutViews(views)
+      setActiveLayoutViewId(activeViewId)
       uiStore.setFilePath(filePath)
       uiStore.markClean()
       uiStore.clearSelection()
@@ -65,7 +86,7 @@ export function useProjectManager() {
         name,
         filePath,
         isDirty: false,
-        snapshot: { menuData: project.menuData, pageLayout: project.pageLayout },
+        snapshot: { menuData: project.menuData, pageLayout: effectiveLayout, layoutViews: views, activeLayoutViewId: activeViewId },
       })
     } else {
       // Snapshot current tab before switching
@@ -77,13 +98,15 @@ export function useProjectManager() {
         filePath,
         name,
         isDirty: false,
-        snapshot: { menuData: project.menuData, pageLayout: project.pageLayout },
+        snapshot: { menuData: project.menuData, pageLayout: effectiveLayout, layoutViews: views, activeLayoutViewId: activeViewId },
       }
       addDocumentTab(newTab)
+      setLayoutViews(views)
+      setActiveLayoutViewId(activeViewId)
 
       // Load into live stores
       menuStore.loadMenuData(project.menuData)
-      layoutStore.loadPageLayout(project.pageLayout)
+      layoutStore.loadPageLayout(effectiveLayout)
       uiStore.setFilePath(filePath)
       uiStore.markClean()
       uiStore.clearSelection()
@@ -210,6 +233,8 @@ export function useProjectManager() {
     uiStore.setFilePath(null)
     uiStore.markClean()
     uiStore.clearSelection()
+    useUIStore.getState().setLayoutViews([])
+    useUIStore.getState().setActiveLayoutViewId(null)
 
     // Create new tab with fresh data
     const { menuData } = useMenuStore.getState()
@@ -221,6 +246,123 @@ export function useProjectManager() {
       name: 'Untitled',
       isDirty: false,
       snapshot: { menuData, pageLayout },
+    }
+    addDocumentTab(newTab)
+  }, [menuStore, layoutStore, uiStore, snapshotCurrentTab])
+
+  const handleDuplicate = useCallback(() => {
+    // Snapshot current tab before switching
+    snapshotCurrentTab()
+
+    // Deep-clone menu data with new IDs
+    const currentMenu = useMenuStore.getState().menuData
+    const currentLayout = useLayoutStore.getState().pageLayout
+
+    // Build mappings of old IDs to new ones for layout fixup
+    const sectionIdMap = new Map<string, string>()
+    const itemIdMap = new Map<string, string>()
+
+    const clonedSections = currentMenu.sections.map((s) => {
+      const newSectionId = nanoid()
+      sectionIdMap.set(s.id, newSectionId)
+      return {
+        ...s,
+        id: newSectionId,
+        items: s.items.map((item) => {
+          const newItemId = nanoid()
+          itemIdMap.set(item.id, newItemId)
+          return {
+            ...item,
+            id: newItemId,
+            variants: item.variants?.map((v) => ({ ...v, id: nanoid() })),
+          }
+        }),
+      }
+    })
+
+    const clonedMenuData = {
+      ...currentMenu,
+      title: currentMenu.title ? `${currentMenu.title} (Copy)` : 'Untitled (Copy)',
+      sections: clonedSections,
+      pageImages: currentMenu.pageImages?.map((img) => ({ ...img, id: nanoid() })),
+      textFrames: currentMenu.textFrames?.map((tf) => ({ ...tf, id: nanoid(), style: { ...tf.style } })),
+    }
+
+    // Clone layout, remapping section IDs in sectionLayouts and pages
+    const clonedLayout = {
+      ...currentLayout,
+      sectionLayouts: currentLayout.sectionLayouts.map((sl) => ({
+        ...sl,
+        sectionId: sectionIdMap.get(sl.sectionId) || sl.sectionId,
+      })),
+      pages: currentLayout.pages?.map((p) => ({
+        ...p,
+        id: nanoid(),
+        sectionIds: p.sectionIds.map((id) => sectionIdMap.get(id) || id),
+      })),
+      triFold: currentLayout.triFold ? {
+        ...currentLayout.triFold,
+        panelSections: Object.fromEntries(
+          Object.entries(currentLayout.triFold.panelSections).map(([panel, ids]) => [
+            panel,
+            (ids || []).map((id: string) => sectionIdMap.get(id) || id),
+          ])
+        ),
+      } : undefined,
+      typography: { ...currentLayout.typography },
+      colorScheme: { ...currentLayout.colorScheme },
+      margins: { ...currentLayout.margins },
+    }
+
+    // Clone layout views with remapped section/item IDs
+    const { layoutViews, activeLayoutViewId } = useUIStore.getState()
+    const remapLayout = (pl: any) => ({
+      ...pl,
+      sectionLayouts: (pl.sectionLayouts || []).map((sl: any) => ({
+        ...sl,
+        sectionId: sectionIdMap.get(sl.sectionId) || sl.sectionId,
+      })),
+      pages: pl.pages?.map((p: any) => ({
+        ...p,
+        id: nanoid(),
+        sectionIds: (p.sectionIds || []).map((id: string) => sectionIdMap.get(id) || id),
+      })),
+      triFold: pl.triFold ? {
+        ...pl.triFold,
+        panelSections: Object.fromEntries(
+          Object.entries(pl.triFold.panelSections).map(([panel, ids]) => [
+            panel,
+            ((ids as string[]) || []).map((id: string) => sectionIdMap.get(id) || id),
+          ])
+        ),
+      } : undefined,
+    })
+    const clonedViews = layoutViews.map(v => ({
+      ...v,
+      id: nanoid(),
+      pageLayout: remapLayout(JSON.parse(JSON.stringify(v.pageLayout))),
+      hiddenSectionIds: (v.hiddenSectionIds || []).map(id => sectionIdMap.get(id) || id),
+      hiddenItemIds: (v.hiddenItemIds || []).map(id => itemIdMap.get(id) || id),
+    }))
+    const clonedActiveViewId = clonedViews.length > 0 ? clonedViews[0].id : null
+
+    // Load cloned data into stores
+    menuStore.loadMenuData(clonedMenuData)
+    layoutStore.loadPageLayout(clonedLayout)
+    uiStore.setFilePath(null)
+    uiStore.markDirty()
+    uiStore.clearSelection()
+    useUIStore.getState().setLayoutViews(clonedViews)
+    useUIStore.getState().setActiveLayoutViewId(clonedActiveViewId)
+
+    // Create new tab
+    const { addDocumentTab } = useUIStore.getState()
+    const newTab: DocumentTab = {
+      id: nanoid(),
+      filePath: null,
+      name: clonedMenuData.title || 'Untitled (Copy)',
+      isDirty: true,
+      snapshot: { menuData: clonedMenuData, pageLayout: clonedLayout, layoutViews: clonedViews, activeLayoutViewId: clonedActiveViewId },
     }
     addDocumentTab(newTab)
   }, [menuStore, layoutStore, uiStore, snapshotCurrentTab])
@@ -242,8 +384,10 @@ export function useProjectManager() {
       }
       autoSaveTimerRef.current = setTimeout(async () => {
         if (!window.electronAPI) return
+        const currentPath = useUIStore.getState().currentFilePath
+        if (!currentPath) return
         const json = serializeProject()
-        await window.electronAPI.fileSave(uiStore.currentFilePath + '.autosave', json)
+        await window.electronAPI.fileSave(currentPath + '.autosave', json)
       }, autoSaveInterval * 1000)
     }
     return () => {
@@ -317,6 +461,13 @@ export function useProjectManager() {
     return () => window.removeEventListener('menu-maker:open-recent', handler)
   }, [handleOpenRecent])
 
+  // Listen for duplicate menu event
+  useEffect(() => {
+    const handler = () => handleDuplicate()
+    window.addEventListener('menu-maker:duplicate-menu', handler)
+    return () => window.removeEventListener('menu-maker:duplicate-menu', handler)
+  }, [handleDuplicate])
+
   // Keep active tab dirty state in sync
   useEffect(() => {
     const { activeDocumentId, updateDocumentTab } = useUIStore.getState()
@@ -325,5 +476,5 @@ export function useProjectManager() {
     }
   }, [uiStore.isDirty])
 
-  return { handleSave, handleSaveAs, handleOpen, handleNew, handleOpenRecent, handleImportData, serializeProject }
+  return { handleSave, handleSaveAs, handleOpen, handleNew, handleDuplicate, handleOpenRecent, handleImportData, serializeProject }
 }

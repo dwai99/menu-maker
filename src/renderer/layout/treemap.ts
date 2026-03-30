@@ -9,8 +9,163 @@ import {
   estimateSectionHeight,
   estimatePartialSectionHeight,
   findSplitPoint,
+  HEIGHT_BUFFER,
 } from './measure'
-import { sectionSortKey } from './section-order'
+// Sections are placed in editor order (the order they arrive in the sections array)
+
+/** A contiguous range [start, end) of section indices assigned to one column */
+export interface ColumnGroup {
+  start: number
+  end: number
+}
+
+/**
+ * Can N sections (with gaps) fit in K columns where no column exceeds maxHeight?
+ * Greedy left-to-right: fill each column until adding the next section would exceed maxHeight.
+ */
+export function canPartition(heights: number[], k: number, maxHeight: number, vGapPx: number): boolean {
+  let cols = 1
+  let currentH = 0
+  for (let i = 0; i < heights.length; i++) {
+    const added = currentH === 0 ? heights[i] : heights[i] + vGapPx
+    if (currentH + added > maxHeight) {
+      // Start a new column with this section
+      cols++
+      if (cols > k) return false
+      currentH = heights[i]
+    } else {
+      currentH += added
+    }
+  }
+  return true
+}
+
+/**
+ * Reconstruct the actual partition given the validated target height.
+ * Returns ColumnGroup[] with [start, end) indices for each column.
+ */
+export function buildPartition(heights: number[], k: number, maxHeight: number, vGapPx: number): ColumnGroup[] {
+  const groups: ColumnGroup[] = []
+  let start = 0
+  let currentH = 0
+
+  for (let i = 0; i < heights.length; i++) {
+    const added = currentH === 0 ? heights[i] : heights[i] + vGapPx
+    if (currentH + added > maxHeight && i > start) {
+      groups.push({ start, end: i })
+      start = i
+      currentH = heights[i]
+    } else {
+      currentH += added
+    }
+  }
+  // Final group
+  if (start < heights.length) {
+    groups.push({ start, end: heights.length })
+  }
+
+  // If we have fewer groups than k (sections are short), pad with empty groups
+  // pointing at the end so the caller doesn't break
+  while (groups.length < k) {
+    groups.push({ start: heights.length, end: heights.length })
+  }
+
+  return groups
+}
+
+/**
+ * Divide N sections into K contiguous groups minimizing the maximum group height.
+ * Uses binary search on the answer + greedy validation ("painter's partition").
+ * Contiguous = sections stay in editor order.
+ */
+export function balancedPartition(heights: number[], k: number, vGapPx: number): ColumnGroup[] {
+  if (heights.length === 0) {
+    const empty: ColumnGroup[] = []
+    for (let i = 0; i < k; i++) empty.push({ start: 0, end: 0 })
+    return empty
+  }
+
+  if (k >= heights.length) {
+    // More columns than sections → one per column
+    const groups: ColumnGroup[] = heights.map((_, i) => ({ start: i, end: i + 1 }))
+    while (groups.length < k) groups.push({ start: heights.length, end: heights.length })
+    return groups
+  }
+
+  // Binary search on the maximum column height
+  let lo = Math.max(...heights) // at least one section per column
+  let hi = heights.reduce((a, b) => a + b, 0) + (heights.length - 1) * vGapPx // all in one column
+
+  while (hi - lo > 0.5) {
+    const mid = (lo + hi) / 2
+    if (canPartition(heights, k, mid, vGapPx)) {
+      hi = mid
+    } else {
+      lo = mid
+    }
+  }
+
+  return buildPartition(heights, k, Math.ceil(hi), vGapPx)
+}
+
+/**
+ * Wrapper around findSplitPoint that avoids orphaned single items.
+ * If continuation would have only 1 item, moves split back by 1 (so continuation gets ≥2).
+ * Only adjusts if the first part still has ≥2 items after the move.
+ */
+export function findSplitPointWithOrphanGuard(
+  section: MenuSection,
+  typography: TypographyConfig,
+  containerWidthPx: number,
+  availableHeightPx: number,
+  itemSeparator: string,
+  startItemIndex: number,
+  endItemIndex: number | undefined,
+  variantDisplayMode?: VariantDisplayMode,
+): { splitIndex: number; usedHeight: number } {
+  const result = findSplitPoint(
+    section,
+    typography,
+    containerWidthPx,
+    availableHeightPx,
+    itemSeparator as any,
+    startItemIndex,
+    variantDisplayMode,
+  )
+
+  const totalEnd = endItemIndex ?? (section.items?.length || 0)
+
+  // Check if continuation would have only 1 item
+  if (result.splitIndex < totalEnd && (totalEnd - result.splitIndex) === 1) {
+    // Move split back by 1 so continuation gets 2 items
+    const adjustedSplit = result.splitIndex - 1
+    if (adjustedSplit - startItemIndex >= 2) {
+      // Re-measure with adjusted split — find height up to adjustedSplit
+      const adjusted = findSplitPoint(
+        section,
+        typography,
+        containerWidthPx,
+        Infinity, // no limit, just measure
+        itemSeparator as any,
+        startItemIndex,
+        variantDisplayMode,
+      )
+      // We need to compute the actual height for items [startItemIndex, adjustedSplit)
+      const partialHeight = estimatePartialSectionHeight(
+        section,
+        typography,
+        containerWidthPx,
+        itemSeparator as any,
+        startItemIndex,
+        adjustedSplit,
+        variantDisplayMode,
+      )
+      return { splitIndex: adjustedSplit, usedHeight: partialHeight }
+    }
+  }
+
+  return result
+}
 
 export interface TreemapResult {
   sectionLayouts: SectionLayout[]
@@ -23,7 +178,6 @@ export interface TreemapResult {
 }
 
 const DPI = 96
-const HEIGHT_BUFFER = 1.15 // 15% safety margin on height estimates
 
 /**
  * Smart single-page grid layout.
@@ -89,6 +243,7 @@ export function computeTreemapLayout(input: {
       config.fontScale,
       config.allowSplit,
       pageLayout.variantDisplayMode,
+      pageLayout.sectionTitleDecoration,
     )
 
     if (!result.overflow) {
@@ -123,11 +278,13 @@ interface Assignment {
 
 /**
  * Try a grid layout with specific column count.
- * Uses balanced bin-packing with optional section splitting.
+ * Uses balanced contiguous partition to distribute sections across columns,
+ * with optional section splitting and whitespace distribution.
  *
- * When allowSplit is true and a section doesn't fit in any column,
- * it splits the section: items that fit go in the current column,
- * remaining items continue in the next available column (no header repeat).
+ * Phase A: Measure all section heights
+ * Phase B: Use balancedPartition to assign contiguous section ranges to columns
+ * Phase C: Place sections per column, splitting if needed
+ * Phase D: Distribute whitespace evenly between sections in each column
  */
 function tryGridLayout(
   sections: MenuSection[],
@@ -139,6 +296,7 @@ function tryGridLayout(
   fontScale: number,
   allowSplit: boolean,
   variantDisplayMode?: VariantDisplayMode,
+  sectionTitleDeco?: import('../models/layout').SectionTitleDecoration,
 ): TreemapResult {
   const hGapPx = gridCols > 1 ? 16 : 0
   const totalHGapPx = (gridCols - 1) * hGapPx
@@ -147,117 +305,145 @@ function tryGridLayout(
   const hGapPct = contentWidthPx > 0 ? (hGapPx / contentWidthPx) * 100 : 0
   const vGapPx = 8
 
-  // Measure all sections
-  const fragments: Fragment[] = sections.map((section) => {
-    const result = estimateSectionHeight(section, typography, colWidthPx, 1, itemSeparator as any, variantDisplayMode)
+  // ── Phase A: Measure all sections ──
+  const measured: Fragment[] = sections.map((section) => {
+    const result = estimateSectionHeight(section, typography, colWidthPx, 1, itemSeparator as any, variantDisplayMode, sectionTitleDeco)
     return {
       section,
       startItemIndex: 0,
-      heightPx: (result.estimatedHeight + 16) * HEIGHT_BUFFER,
+      heightPx: (result.estimatedHeight + 4) * HEIGHT_BUFFER,
     }
   })
 
-  // Sort by semantic menu order (appetizers first, desserts/drinks last)
-  fragments.sort((a, b) => sectionSortKey(a.section.title) - sectionSortKey(b.section.title))
+  // ── Phase B: Balanced partition ──
+  const heights = measured.map((f) => f.heightPx)
+  const groups = balancedPartition(heights, gridCols, vGapPx)
 
+  // ── Phase C: Place & Split ──
   const watermarksPx = new Array(gridCols).fill(0)
   const assignments: Assignment[] = []
 
-  // Process queue — fragments may be added during splitting
-  const queue = [...fragments]
+  // Build per-column queues from the partition groups
+  const colQueues: Fragment[][] = groups.map((g) =>
+    measured.slice(g.start, g.end).map((f) => ({ ...f }))
+  )
 
-  while (queue.length > 0) {
-    const frag = queue.shift()!
+  for (let col = 0; col < gridCols; col++) {
+    const queue = colQueues[col]
 
-    // Find column with the most remaining space
-    let bestCol = 0
-    for (let c = 1; c < gridCols; c++) {
-      if (watermarksPx[c] < watermarksPx[bestCol]) bestCol = c
-    }
+    while (queue.length > 0) {
+      const frag = queue.shift()!
+      const remainingPx = availableHeightPx - watermarksPx[col]
+      const itemCount = (frag.section.items || []).length
+      const fragEnd = frag.endItemIndex ?? itemCount
 
-    const remainingPx = availableHeightPx - watermarksPx[bestCol]
-    const itemCount = (frag.section.items || []).length
-    const fragEnd = frag.endItemIndex ?? itemCount
-
-    if (frag.heightPx <= remainingPx) {
-      // Fits — place it
-      assignments.push({
-        section: frag.section,
-        col: bestCol,
-        yPx: watermarksPx[bestCol],
-        heightPx: frag.heightPx,
-        startItemIndex: frag.startItemIndex,
-        endItemIndex: frag.endItemIndex,
-      })
-      watermarksPx[bestCol] += frag.heightPx + vGapPx
-    } else if (allowSplit && (fragEnd - frag.startItemIndex) > 1) {
-      // Doesn't fit but we can try splitting
-      const splitResult = findSplitPoint(
-        frag.section,
-        typography,
-        colWidthPx,
-        remainingPx / HEIGHT_BUFFER, // un-buffer for the split calculation
-        itemSeparator as any,
-        frag.startItemIndex,
-        variantDisplayMode,
-      )
-
-      if (splitResult.splitIndex > frag.startItemIndex && splitResult.splitIndex < fragEnd) {
-        // Successfully split — place first part
-        const firstPartHeight = splitResult.usedHeight * HEIGHT_BUFFER
+      if (frag.heightPx <= remainingPx) {
+        // Fits — place it
         assignments.push({
           section: frag.section,
-          col: bestCol,
-          yPx: watermarksPx[bestCol],
-          heightPx: firstPartHeight,
-          startItemIndex: frag.startItemIndex,
-          endItemIndex: splitResult.splitIndex,
-        })
-        watermarksPx[bestCol] += firstPartHeight + vGapPx
-
-        // Queue the remainder
-        const remainderHeight = estimatePartialSectionHeight(
-          frag.section,
-          typography,
-          colWidthPx,
-          itemSeparator as any,
-          splitResult.splitIndex,
-          frag.endItemIndex,
-          variantDisplayMode,
-        )
-
-        queue.push({
-          section: frag.section,
-          startItemIndex: splitResult.splitIndex,
-          endItemIndex: frag.endItemIndex,
-          heightPx: (remainderHeight + 16) * HEIGHT_BUFFER,
-        })
-
-        // Re-sort queue by height desc for better packing of remainder
-        queue.sort((a, b) => b.heightPx - a.heightPx)
-      } else {
-        // Can't split meaningfully — place it as-is (will overflow)
-        assignments.push({
-          section: frag.section,
-          col: bestCol,
-          yPx: watermarksPx[bestCol],
+          col,
+          yPx: watermarksPx[col],
           heightPx: frag.heightPx,
           startItemIndex: frag.startItemIndex,
           endItemIndex: frag.endItemIndex,
         })
-        watermarksPx[bestCol] += frag.heightPx + vGapPx
+        watermarksPx[col] += frag.heightPx + vGapPx
+      } else if (allowSplit && (fragEnd - frag.startItemIndex) > 1) {
+        // Too tall — try splitting
+        const splitBudgetPx = watermarksPx[col] < vGapPx * 2 ? availableHeightPx : remainingPx
+        const splitResult = findSplitPointWithOrphanGuard(
+          frag.section,
+          typography,
+          colWidthPx,
+          splitBudgetPx / HEIGHT_BUFFER,
+          itemSeparator,
+          frag.startItemIndex,
+          frag.endItemIndex,
+          variantDisplayMode,
+        )
+
+        if (splitResult.splitIndex > frag.startItemIndex && splitResult.splitIndex < fragEnd) {
+          // Split succeeded — place first part
+          const firstPartHeight = splitResult.usedHeight * HEIGHT_BUFFER
+          assignments.push({
+            section: frag.section,
+            col,
+            yPx: watermarksPx[col],
+            heightPx: firstPartHeight,
+            startItemIndex: frag.startItemIndex,
+            endItemIndex: splitResult.splitIndex,
+          })
+          watermarksPx[col] += firstPartHeight + vGapPx
+
+          // Push remainder to next column's queue
+          const remainderHeight = estimatePartialSectionHeight(
+            frag.section,
+            typography,
+            colWidthPx,
+            itemSeparator as any,
+            splitResult.splitIndex,
+            frag.endItemIndex,
+            variantDisplayMode,
+          )
+
+          const remainderFrag: Fragment = {
+            section: frag.section,
+            startItemIndex: splitResult.splitIndex,
+            endItemIndex: frag.endItemIndex,
+            heightPx: (remainderHeight + 4) * HEIGHT_BUFFER,
+          }
+
+          if (col + 1 < gridCols) {
+            colQueues[col + 1].unshift(remainderFrag)
+          } else {
+            // Last column — place overflow here
+            queue.unshift(remainderFrag)
+          }
+        } else {
+          // Can't split meaningfully — push to next column or overflow
+          if (col + 1 < gridCols) {
+            colQueues[col + 1].unshift(frag)
+          } else {
+            // Last column — place as overflow
+            assignments.push({
+              section: frag.section,
+              col,
+              yPx: watermarksPx[col],
+              heightPx: frag.heightPx,
+              startItemIndex: frag.startItemIndex,
+              endItemIndex: frag.endItemIndex,
+            })
+            watermarksPx[col] += frag.heightPx + vGapPx
+          }
+        }
+      } else {
+        // Can't split — push to next column or overflow
+        if (col + 1 < gridCols && frag.heightPx > remainingPx) {
+          colQueues[col + 1].unshift(frag)
+        } else {
+          assignments.push({
+            section: frag.section,
+            col,
+            yPx: watermarksPx[col],
+            heightPx: frag.heightPx,
+            startItemIndex: frag.startItemIndex,
+            endItemIndex: frag.endItemIndex,
+          })
+          watermarksPx[col] += frag.heightPx + vGapPx
+        }
       }
-    } else {
-      // No splitting allowed or only 1 item — place as-is
-      assignments.push({
-        section: frag.section,
-        col: bestCol,
-        yPx: watermarksPx[bestCol],
-        heightPx: frag.heightPx,
-        startItemIndex: frag.startItemIndex,
-        endItemIndex: frag.endItemIndex,
-      })
-      watermarksPx[bestCol] += frag.heightPx + vGapPx
+    }
+  }
+
+  // ── Phase D: Stack sections from top of each column at natural height ──
+  for (let col = 0; col < gridCols; col++) {
+    const colAssignments = assignments.filter((a) => a.col === col)
+    if (colAssignments.length === 0) continue
+
+    let y = 0
+    for (let i = 0; i < colAssignments.length; i++) {
+      colAssignments[i].yPx = y
+      y += colAssignments[i].heightPx + (i < colAssignments.length - 1 ? vGapPx : 0)
     }
   }
 
@@ -293,7 +479,7 @@ function tryGridLayout(
 }
 
 /** Scale all font sizes in a typography config */
-function scaleTypography(typography: TypographyConfig, scale: number): TypographyConfig {
+export function scaleTypography(typography: TypographyConfig, scale: number): TypographyConfig {
   if (scale >= 1.0) return typography
   const s = (style: any) => ({
     ...style,

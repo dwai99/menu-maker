@@ -17,15 +17,22 @@ function snapshotCurrentTab(): void {
     isDirty,
     currentFilePath,
     updateDocumentTab,
+    layoutViews,
+    activeLayoutViewId,
+    syncActiveViewLayout,
   } = useUIStore.getState()
 
   if (!activeDocumentId) return
 
+  // Save current layout into active view before snapshotting
+  syncActiveViewLayout()
+
   const { menuData } = useMenuStore.getState()
   const { pageLayout } = useLayoutStore.getState()
+  const views = useUIStore.getState().layoutViews // re-read after sync
 
   updateDocumentTab(activeDocumentId, {
-    snapshot: { menuData, pageLayout },
+    snapshot: { menuData, pageLayout, layoutViews: views, activeLayoutViewId },
     isDirty,
     filePath: currentFilePath,
   })
@@ -46,10 +53,12 @@ function clearUndoHistory(): void {
 function restoreTabSnapshot(tab: DocumentTab): void {
   const { loadMenuData } = useMenuStore.getState()
   const { loadPageLayout } = useLayoutStore.getState()
-  const { setFilePath, markDirty, markClean, clearSelection } = useUIStore.getState()
+  const { setFilePath, markDirty, markClean, clearSelection, setLayoutViews, setActiveLayoutViewId } = useUIStore.getState()
 
   loadMenuData(tab.snapshot.menuData)
   loadPageLayout(tab.snapshot.pageLayout)
+  setLayoutViews(tab.snapshot.layoutViews ?? [])
+  setActiveLayoutViewId(tab.snapshot.activeLayoutViewId ?? null)
   setFilePath(tab.filePath)
 
   if (tab.isDirty) {
